@@ -1,0 +1,60 @@
+import { Slot } from '@radix-ui/react-slot';
+import { cva, type VariantProps } from 'class-variance-authority';
+import { Loader2 } from 'lucide-react';
+import { forwardRef, type ButtonHTMLAttributes } from 'react';
+import { cn } from '@/lib/utils';
+
+const buttonVariants = cva(
+  'inline-flex items-center justify-center gap-2 rounded-xl text-[13px] font-medium tracking-tight transition-all duration-200 disabled:pointer-events-none disabled:opacity-45 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-aurora-400',
+  {
+    variants: {
+      variant: {
+        primary:
+          'bg-gradient-to-b from-aurora-400 to-aurora-600 text-white shadow-[0_6px_20px_rgba(31,62,245,0.45)] hover:brightness-110 active:brightness-95',
+        glass:
+          'glass text-white hover:bg-white/10 active:bg-white/[0.06]',
+        ghost:
+          'text-dim hover:bg-white/[0.07] hover:text-white',
+        danger:
+          'bg-rose-400/15 text-rose-400 ring-1 ring-inset ring-rose-400/30 hover:bg-rose-400/25',
+      },
+      size: {
+        sm: 'h-8 px-3',
+        md: 'h-10 px-4',
+        lg: 'h-12 px-6 text-sm',
+        icon: 'size-9',
+      },
+    },
+    defaultVariants: { variant: 'glass', size: 'md' },
+  },
+);
+
+export interface ButtonProps
+  extends ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean;
+  loading?: boolean;
+}
+
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+  (
+    { className, variant, size, asChild = false, loading = false, children, disabled, ...props },
+    ref,
+  ) => {
+    const Comp = asChild ? Slot : 'button';
+    return (
+      <Comp
+        ref={ref}
+        className={cn(buttonVariants({ variant, size }), className)}
+        disabled={disabled || loading}
+        {...props}
+      >
+        {loading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+        {children}
+      </Comp>
+    );
+  },
+);
+Button.displayName = 'Button';
+
+export { buttonVariants };

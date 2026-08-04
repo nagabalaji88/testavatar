@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.local
+*.pem
+
+# Runtime artefacts
+backend/config/models.json.tmp
+*.log
+.DS_Store
