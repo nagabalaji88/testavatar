@@ -29,6 +29,21 @@ resolved rather than concatenated.
 
 ## Quick start
 
+**Windows** — double-click `run-mpg.bat`, or from a console:
+
+```bat
+run-mpg.bat            :: build and start everything
+run-mpg.bat logs       :: tail the pipeline logs
+run-mpg.bat down       :: stop, keeping the data
+run-mpg.bat help       :: all commands
+```
+
+It checks Docker, creates `.env` from `.env.example` on first run with a
+randomly generated `JWT_SECRET_KEY`, warns if no provider API key is set, waits
+for the API to report healthy, then opens the dashboard.
+
+**macOS / Linux**
+
 ```bash
 cp .env.example .env          # add at least one provider API key
 docker compose up --build
