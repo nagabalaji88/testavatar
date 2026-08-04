@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Iterable, Sequence
+from typing import Iterable, Optional, Sequence
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -112,7 +112,7 @@ SIMILARITY_CONFLICT = 0.55
 # --- Data structures -------------------------------------------------------
 
 
-@dataclass(slots=True)
+@dataclass
 class CandidateInput:
     """A scored candidate entering the consensus engine."""
 
@@ -127,7 +127,7 @@ class CandidateInput:
         return self.verdict.overall_score
 
 
-@dataclass(slots=True)
+@dataclass
 class SectionVariant:
     model_id: str
     model_name: str
@@ -142,7 +142,7 @@ class SectionVariant:
         return not self.body.strip()
 
 
-@dataclass(slots=True)
+@dataclass
 class MergedSection:
     canonical: str
     title: str
@@ -151,7 +151,7 @@ class MergedSection:
     conflicts: list[ConflictRecord] = field(default_factory=list)
 
 
-@dataclass(slots=True)
+@dataclass
 class ConsensusResult:
     content: str
     raw_merged_content: str
@@ -159,8 +159,8 @@ class ConsensusResult:
     conflicts: list[ConflictRecord]
     optimization: OptimizationReport
     token_count: int
-    polished_by: str | None = None
-    polish_result: LLMResult | None = None
+    polished_by: Optional[str] = None
+    polish_result: Optional[LLMResult] = None
 
 
 # --- Phase 1: extraction ---------------------------------------------------
@@ -333,7 +333,7 @@ def _declared_formats(body: str) -> set[str]:
     return {token for token in FORMAT_TOKENS if token in lowered}
 
 
-@dataclass(slots=True)
+@dataclass
 class ConflictOutcome:
     """Conflicts found in a pass, plus the directives that lost them."""
 
@@ -345,7 +345,7 @@ class ConflictOutcome:
         self.losing_units |= other.losing_units
 
 
-def _contradiction(left: str, right: str) -> tuple[str, float] | None:
+def _contradiction(left: str, right: str) -> Optional[tuple[str, float]]:
     """Classify a pair of directives as contradictory, or return None.
 
     Two directives conflict when they address the same subject *and* either
@@ -590,9 +590,9 @@ def resolve_conflicts(
 def merge_section(
     canonical: str,
     variants: Sequence[SectionVariant],
-    losers: set[str] | None = None,
-    conflicts: Sequence[ConflictRecord] | None = None,
-) -> MergedSection | None:
+    losers: Optional[set[str]] = None,
+    conflicts: Optional[Sequence[ConflictRecord]] = None,
+) -> Optional[MergedSection]:
     """Adopt the strongest variant then graft in novel directives from the rest."""
     live = [variant for variant in variants if not variant.is_empty]
     if not live:
@@ -789,11 +789,11 @@ def _required_headings(content: str) -> list[str]:
 class ConsensusEngine:
     """Public entry point for consensus synthesis."""
 
-    def __init__(self, service: LLMService | None = None) -> None:
+    def __init__(self, service: Optional[LLMService] = None) -> None:
         self._llm = service or llm_service
 
     def synthesize_deterministic(
-        self, candidates: Sequence[CandidateInput], analysis: RequirementAnalysis | None = None
+        self, candidates: Sequence[CandidateInput], analysis: Optional[RequirementAnalysis] = None
     ) -> tuple[str, list[SectionProvenance], list[ConflictRecord]]:
         """Phases 1-3: produce the merged prompt without any model involvement."""
         if not candidates:
@@ -850,15 +850,15 @@ class ConsensusEngine:
     async def synthesize(
         self,
         candidates: Sequence[CandidateInput],
-        analysis: RequirementAnalysis | None = None,
+        analysis: Optional[RequirementAnalysis] = None,
         *,
         polish: bool = True,
     ) -> ConsensusResult:
         merged, provenance, conflicts = self.synthesize_deterministic(candidates, analysis)
         optimized, report = optimize(merged)
 
-        polished_by: str | None = None
-        polish_result: LLMResult | None = None
+        polished_by: Optional[str] = None
+        polish_result: Optional[LLMResult] = None
 
         if polish:
             polished, polished_by, polish_result = await self._polish(
@@ -893,8 +893,8 @@ class ConsensusEngine:
         self,
         content: str,
         conflicts: Sequence[ConflictRecord],
-        analysis: RequirementAnalysis | None,
-    ) -> tuple[str | None, str | None, LLMResult | None]:
+        analysis: Optional[RequirementAnalysis],
+    ) -> tuple[Optional[str], Optional[str], Optional[LLMResult]]:
         try:
             provider = model_registry.get(settings.consensus_model_id)
         except UnknownProviderError:

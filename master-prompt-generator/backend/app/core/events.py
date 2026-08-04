@@ -12,8 +12,8 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
-from enum import StrEnum
-from typing import Any, AsyncIterator
+from enum import Enum
+from typing import Any, AsyncIterator, Optional, Union
 
 import redis.asyncio as aioredis
 from pydantic import BaseModel, Field
@@ -29,7 +29,7 @@ HISTORY_LIMIT = 500
 HISTORY_TTL_SECONDS = 60 * 60 * 24
 
 
-class EventType(StrEnum):
+class EventType(str, Enum):
     RUN_QUEUED = "run.queued"
     RUN_STARTED = "run.started"
     STAGE_STARTED = "stage.started"
@@ -58,9 +58,9 @@ class RunEvent(BaseModel):
 class EventBus:
     """Thin async wrapper over Redis pub/sub with a replayable backlog."""
 
-    def __init__(self, redis_url: str | None = None) -> None:
+    def __init__(self, redis_url: Optional[str] = None) -> None:
         self._redis_url = redis_url or settings.redis_url
-        self._client: aioredis.Redis | None = None
+        self._client: Optional[aioredis.Redis] = None
         self._lock = asyncio.Lock()
 
     async def client(self) -> aioredis.Redis:
@@ -86,13 +86,13 @@ class EventBus:
         await pipe.execute()
 
     async def emit(
-        self, run_id: str | uuid.UUID, event_type: EventType, **payload: Any
+        self, run_id: Union[str, uuid.UUID], event_type: EventType, **payload: Any
     ) -> None:
         await self.publish(
             RunEvent(run_id=str(run_id), type=event_type, payload=payload)
         )
 
-    async def history(self, run_id: str | uuid.UUID) -> list[RunEvent]:
+    async def history(self, run_id: Union[str, uuid.UUID]) -> list[RunEvent]:
         client = await self.client()
         raw = await client.lrange(EVENT_HISTORY_KEY.format(run_id=run_id), 0, -1)
         events: list[RunEvent] = []
@@ -103,7 +103,7 @@ class EventBus:
                 logger.warning("event_history_decode_failed", extra={"raw": item[:200]})
         return events
 
-    async def subscribe(self, run_id: str | uuid.UUID) -> AsyncIterator[RunEvent]:
+    async def subscribe(self, run_id: Union[str, uuid.UUID]) -> AsyncIterator[RunEvent]:
         """Yield backlog then live events for a run until the caller detaches."""
         client = await self.client()
         pubsub = client.pubsub()

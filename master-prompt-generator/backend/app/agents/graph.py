@@ -13,7 +13,12 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, Optional
+
+# On Python < 3.12 the typing_extensions backport is required: it is the only
+# variant that reports __required_keys__ correctly, which LangGraph and Pydantic
+# both rely on when they resolve a TypedDict state schema.
+from typing_extensions import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
@@ -76,9 +81,9 @@ class PipelineDependencies:
 
     def __init__(
         self,
-        analyzer: RequirementAnalyzer | None = None,
-        evaluator: PromptEvaluator | None = None,
-        consensus: ConsensusEngine | None = None,
+        analyzer: Optional[RequirementAnalyzer] = None,
+        evaluator: Optional[PromptEvaluator] = None,
+        consensus: Optional[ConsensusEngine] = None,
     ) -> None:
         self.analyzer = analyzer or requirement_analyzer
         self.evaluator = evaluator or prompt_evaluator
@@ -104,9 +109,9 @@ async def _log_execution(
     stage: str,
     status: str,
     *,
-    model_id: str | None = None,
-    result: LLMResult | None = None,
-    detail: dict[str, Any] | None = None,
+    model_id: Optional[str] = None,
+    result: Optional[LLMResult] = None,
+    detail: Optional[dict[str, Any]] = None,
     latency_ms: int = 0,
 ) -> None:
     async with session_scope() as session:
@@ -126,7 +131,7 @@ async def _log_execution(
         )
 
 
-async def _accumulate_usage(run_id: str, result: LLMResult | None) -> None:
+async def _accumulate_usage(run_id: str, result: Optional[LLMResult]) -> None:
     if result is None:
         return
     async with session_scope() as session:
@@ -571,7 +576,7 @@ def build_nodes(deps: PipelineDependencies):
     return analyze_node, generate_node, evaluate_node, consensus_node, finalize_node
 
 
-def build_graph(deps: PipelineDependencies | None = None):
+def build_graph(deps: Optional[PipelineDependencies] = None):
     """Compile the LangGraph state machine."""
     analyze, generate, evaluate, consensus, finalize = build_nodes(
         deps or PipelineDependencies()

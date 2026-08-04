@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from typing import Optional
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -62,10 +63,10 @@ class ModelRegistry:
     API and Celery workers may both mutate the registry.
     """
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(self, path: Optional[Path] = None) -> None:
         self._path = Path(path or settings.model_config_path)
         self._lock = threading.RLock()
-        self._registry: ProviderRegistryConfig | None = None
+        self._registry: Optional[ProviderRegistryConfig] = None
 
     # -- loading -----------------------------------------------------------
 
@@ -110,7 +111,7 @@ class ModelRegistry:
                 return provider
         raise UnknownProviderError(provider_id)
 
-    def resolve(self, provider_ids: list[str] | None) -> list[ProviderConfig]:
+    def resolve(self, provider_ids: Optional[list[str]]) -> list[ProviderConfig]:
         """Resolve a requested selection, defaulting to every enabled provider."""
         if not provider_ids:
             selected = self.enabled()

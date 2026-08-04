@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     celery_result_backend: str = "redis://redis:6379/2"
 
     qdrant_url: str = "http://qdrant:6333"
-    qdrant_api_key: str | None = None
+    qdrant_api_key: Optional[str] = None
     qdrant_collection: str = "mpg_prompts"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
@@ -53,9 +53,9 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
     # --- Provider credentials --------------------------------------------
-    openai_api_key: str | None = None
-    anthropic_api_key: str | None = None
-    gemini_api_key: str | None = None
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
 
     # --- Orchestration tuning --------------------------------------------
     model_config_path: Path = BACKEND_ROOT / "config" / "models.json"
@@ -70,7 +70,7 @@ class Settings(BaseSettings):
 
     # --- Observability ----------------------------------------------------
     otel_enabled: bool = False
-    otel_exporter_otlp_endpoint: str | None = None
+    otel_exporter_otlp_endpoint: Optional[str] = None
     otel_service_name: str = "mpg-backend"
     log_level: str = "INFO"
     metrics_path: str = "/metrics"

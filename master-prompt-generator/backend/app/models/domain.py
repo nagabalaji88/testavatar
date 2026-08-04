@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from enum import StrEnum
-from typing import Any
+from enum import Enum
+from typing import Any, Optional
 
 from sqlalchemy import Column, Index, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -20,7 +20,7 @@ def _uuid() -> uuid.UUID:
     return uuid.uuid4()
 
 
-class RunStatus(StrEnum):
+class RunStatus(str, Enum):
     QUEUED = "queued"
     ANALYZING = "analyzing"
     GENERATING = "generating"
@@ -31,7 +31,7 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
-class CandidateStatus(StrEnum):
+class CandidateStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -45,7 +45,7 @@ class User(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=_uuid, primary_key=True)
     email: str = Field(index=True, unique=True, max_length=320)
     hashed_password: str = Field(max_length=255)
-    full_name: str | None = Field(default=None, max_length=200)
+    full_name: Optional[str] = Field(default=None, max_length=200)
     role: str = Field(default="engineer", max_length=32)
     is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=_utcnow)
@@ -58,37 +58,37 @@ class PromptRun(SQLModel, table=True):
     __table_args__ = (Index("ix_prompt_runs_owner_created", "owner_id", "created_at"),)
 
     id: uuid.UUID = Field(default_factory=_uuid, primary_key=True)
-    owner_id: uuid.UUID | None = Field(default=None, foreign_key="users.id", index=True)
+    owner_id: Optional[uuid.UUID] = Field(default=None, foreign_key="users.id", index=True)
 
     title: str = Field(max_length=240)
     business_problem: str = Field(sa_column=Column(Text, nullable=False))
     target_domain: str = Field(max_length=160)
     constraints: list[str] = Field(default_factory=list, sa_column=Column(JSONB))
     requirements: list[str] = Field(default_factory=list, sa_column=Column(JSONB))
-    audience: str | None = Field(default=None, max_length=240)
-    output_format: str | None = Field(default=None, max_length=64)
+    audience: Optional[str] = Field(default=None, max_length=240)
+    output_format: Optional[str] = Field(default=None, max_length=64)
     selected_model_ids: list[str] = Field(default_factory=list, sa_column=Column(JSONB))
 
-    status: str = Field(default=RunStatus.QUEUED, max_length=32, index=True)
-    error: str | None = Field(default=None, sa_column=Column(Text))
-    analysis: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB))
+    status: str = Field(default=RunStatus.QUEUED.value, max_length=32, index=True)
+    error: Optional[str] = Field(default=None, sa_column=Column(Text))
+    analysis: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
 
     total_cost_usd: float = Field(default=0.0)
     total_input_tokens: int = Field(default=0)
     total_output_tokens: int = Field(default=0)
-    duration_ms: int | None = Field(default=None)
+    duration_ms: Optional[int] = Field(default=None)
 
-    trace_id: str | None = Field(default=None, max_length=64)
+    trace_id: Optional[str] = Field(default=None, max_length=64)
     created_at: datetime = Field(default_factory=_utcnow, index=True)
-    started_at: datetime | None = Field(default=None)
-    completed_at: datetime | None = Field(default=None)
+    started_at: Optional[datetime] = Field(default=None)
+    completed_at: Optional[datetime] = Field(default=None)
 
-    owner: User | None = Relationship(back_populates="runs")
+    owner: Optional[User] = Relationship(back_populates="runs")
     candidates: list["PromptCandidate"] = Relationship(
         back_populates="run",
         sa_relationship_kwargs={"cascade": "all, delete-orphan", "lazy": "selectin"},
     )
-    consensus: "ConsensusPrompt | None" = Relationship(
+    consensus: "Optional[ConsensusPrompt]" = Relationship(
         back_populates="run",
         sa_relationship_kwargs={"cascade": "all, delete-orphan", "uselist": False},
     )
@@ -105,10 +105,10 @@ class PromptCandidate(SQLModel, table=True):
     model_name: str = Field(max_length=120)
     provider: str = Field(max_length=64)
 
-    seed_prompt: str | None = Field(default=None, sa_column=Column(Text))
-    content: str | None = Field(default=None, sa_column=Column(Text))
-    status: str = Field(default=CandidateStatus.PENDING, max_length=24)
-    error: str | None = Field(default=None, sa_column=Column(Text))
+    seed_prompt: Optional[str] = Field(default=None, sa_column=Column(Text))
+    content: Optional[str] = Field(default=None, sa_column=Column(Text))
+    status: str = Field(default=CandidateStatus.PENDING.value, max_length=24)
+    error: Optional[str] = Field(default=None, sa_column=Column(Text))
 
     input_tokens: int = Field(default=0)
     output_tokens: int = Field(default=0)
@@ -116,9 +116,9 @@ class PromptCandidate(SQLModel, table=True):
     latency_ms: int = Field(default=0)
     attempts: int = Field(default=0)
 
-    overall_score: float | None = Field(default=None, index=True)
-    metrics: dict[str, float] | None = Field(default=None, sa_column=Column(JSONB))
-    evaluation: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB))
+    overall_score: Optional[float] = Field(default=None, index=True)
+    metrics: Optional[dict[str, float]] = Field(default=None, sa_column=Column(JSONB))
+    evaluation: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
 
     created_at: datetime = Field(default_factory=_utcnow)
 
@@ -132,10 +132,10 @@ class ConsensusPrompt(SQLModel, table=True):
     run_id: uuid.UUID = Field(foreign_key="prompt_runs.id", unique=True, index=True)
 
     content: str = Field(sa_column=Column(Text, nullable=False))
-    raw_merged_content: str | None = Field(default=None, sa_column=Column(Text))
-    overall_score: float | None = Field(default=None)
-    metrics: dict[str, float] | None = Field(default=None, sa_column=Column(JSONB))
-    evaluation: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB))
+    raw_merged_content: Optional[str] = Field(default=None, sa_column=Column(Text))
+    overall_score: Optional[float] = Field(default=None)
+    metrics: Optional[dict[str, float]] = Field(default=None, sa_column=Column(JSONB))
+    evaluation: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
 
     section_provenance: list[dict[str, Any]] = Field(
         default_factory=list, sa_column=Column(JSONB)
@@ -143,14 +143,14 @@ class ConsensusPrompt(SQLModel, table=True):
     conflicts: list[dict[str, Any]] = Field(
         default_factory=list, sa_column=Column(JSONB)
     )
-    optimization_report: dict[str, Any] | None = Field(
+    optimization_report: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSONB)
     )
 
     token_count: int = Field(default=0)
     tokens_saved: int = Field(default=0)
-    improvement_over_best: float | None = Field(default=None)
-    vector_point_id: str | None = Field(default=None, max_length=64)
+    improvement_over_best: Optional[float] = Field(default=None)
+    vector_point_id: Optional[str] = Field(default=None, max_length=64)
     created_at: datetime = Field(default_factory=_utcnow)
 
     run: PromptRun = Relationship(back_populates="consensus")
@@ -166,13 +166,13 @@ class ExecutionLog(SQLModel, table=True):
     run_id: uuid.UUID = Field(foreign_key="prompt_runs.id", index=True)
 
     stage: str = Field(max_length=48)
-    model_id: str | None = Field(default=None, max_length=80)
+    model_id: Optional[str] = Field(default=None, max_length=80)
     status: str = Field(max_length=24)
     latency_ms: int = Field(default=0)
     input_tokens: int = Field(default=0)
     output_tokens: int = Field(default=0)
     cost_usd: float = Field(default=0.0)
     attempts: int = Field(default=1)
-    span_id: str | None = Field(default=None, max_length=64)
-    detail: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB))
+    span_id: Optional[str] = Field(default=None, max_length=64)
+    detail: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
     created_at: datetime = Field(default_factory=_utcnow, index=True)

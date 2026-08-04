@@ -8,7 +8,7 @@ is logged rather than raised.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Optional
 
 import litellm
 from qdrant_client import AsyncQdrantClient, models as qmodels
@@ -20,16 +20,16 @@ from app.models.schemas import SemanticSearchHit
 logger = get_logger(__name__)
 
 
-def _embedding_api_key() -> str | None:
+def _embedding_api_key() -> Optional[str]:
     return settings.openai_api_key
 
 
 class VectorService:
     def __init__(self) -> None:
-        self._client: AsyncQdrantClient | None = None
+        self._client: Optional[AsyncQdrantClient] = None
         self._ready = False
 
-    async def client(self) -> AsyncQdrantClient | None:
+    async def client(self) -> Optional[AsyncQdrantClient]:
         if self._client is None:
             try:
                 self._client = AsyncQdrantClient(
@@ -69,7 +69,7 @@ class VectorService:
             logger.warning("qdrant_ensure_collection_failed", extra={"error": str(exc)})
             return False
 
-    async def embed(self, text: str) -> list[float] | None:
+    async def embed(self, text: str) -> Optional[list[float]]:
         if not _embedding_api_key():
             return None
         try:
@@ -90,8 +90,8 @@ class VectorService:
         title: str,
         target_domain: str,
         content: str,
-        score: float | None,
-    ) -> str | None:
+        score: Optional[float],
+    ) -> Optional[str]:
         if not await self.ensure_collection():
             return None
         vector = await self.embed(f"{title}\n{target_domain}\n{content}")

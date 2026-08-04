@@ -61,7 +61,14 @@ table to manage the model registry.
 
 ## Architecture
 
-### Backend — Python 3.12 · FastAPI · LangGraph
+### Backend — Python 3.9 · FastAPI · LangGraph
+
+The backend targets **Python 3.9**, so the code uses `Optional[X]` / `Union[X, Y]`
+rather than PEP 604 `X | Y` (Pydantic, SQLModel and FastAPI evaluate annotations
+at runtime, where `|` is a 3.10 feature), `class Foo(str, Enum)` rather than
+`StrEnum`, plain `@dataclass` rather than `slots=True`, and
+`typing_extensions.TypedDict` for the LangGraph state schema. Verified with
+`vermin -t=3.9- --eval-annotations`.
 
 | Path | Responsibility |
 | --- | --- |

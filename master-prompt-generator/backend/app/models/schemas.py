@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from enum import StrEnum
-from typing import Any, Literal
+from enum import Enum
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 # ---------------------------------------------------------------------------
 
 
-class MetricCategory(StrEnum):
+class MetricCategory(str, Enum):
     CLARITY_STRUCTURE = "clarity_structure"
     COGNITIVE_QUALITY = "cognitive_quality"
     PRODUCTION_READINESS = "production_readiness"
@@ -142,7 +142,7 @@ METRIC_WEIGHTS: dict[str, float] = {m.key: m.weight for m in METRIC_DEFINITIONS}
 METRIC_BY_KEY: dict[str, MetricDefinition] = {m.key: m for m in METRIC_DEFINITIONS}
 
 
-class RiskLevel(StrEnum):
+class RiskLevel(str, Enum):
     NONE = "None"
     LOW = "Low"
     MEDIUM = "Medium"
@@ -167,7 +167,7 @@ class JudgeVerdict(BaseModel):
     weaknesses: list[str] = Field(default_factory=list)
     missing_elements: list[str] = Field(default_factory=list)
     security_assessment: SecurityAssessment = Field(default_factory=SecurityAssessment)
-    rationale: str | None = None
+    rationale: Optional[str] = None
 
     @field_validator("metrics")
     @classmethod
@@ -204,7 +204,7 @@ class ProviderConfig(BaseModel):
     enabled: bool = True
     temperature: float = Field(default=0.4, ge=0, le=2)
     supports_json_mode: bool = True
-    api_base: str | None = None
+    api_base: Optional[str] = None
     weight: float = Field(default=1.0, gt=0)
 
     def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
@@ -242,7 +242,7 @@ class ProviderToggle(BaseModel):
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=10, max_length=128)
-    full_name: str | None = None
+    full_name: Optional[str] = None
     role: Literal["viewer", "engineer", "admin"] = "engineer"
 
 
@@ -251,7 +251,7 @@ class UserRead(BaseModel):
 
     id: uuid.UUID
     email: str
-    full_name: str | None
+    full_name: Optional[str]
     role: str
     is_active: bool
     created_at: datetime
@@ -279,8 +279,8 @@ class RunCreate(BaseModel):
     target_domain: str = Field(min_length=2, max_length=160)
     constraints: list[str] = Field(default_factory=list, max_length=40)
     requirements: list[str] = Field(default_factory=list, max_length=40)
-    audience: str | None = Field(default=None, max_length=240)
-    output_format: str | None = Field(default=None, max_length=64)
+    audience: Optional[str] = Field(default=None, max_length=240)
+    output_format: Optional[str] = Field(default=None, max_length=64)
     model_ids: list[str] = Field(default_factory=list, max_length=12)
 
 
@@ -298,7 +298,7 @@ class RequirementAnalysis(BaseModel):
     required_sections: list[str] = Field(default_factory=list)
     recommended_output_format: str = "markdown"
     tone: str = "precise, professional"
-    notes: str | None = None
+    notes: Optional[str] = None
 
 
 class CandidateRead(BaseModel):
@@ -309,15 +309,15 @@ class CandidateRead(BaseModel):
     model_name: str
     provider: str
     status: str
-    content: str | None
-    error: str | None
+    content: Optional[str]
+    error: Optional[str]
     input_tokens: int
     output_tokens: int
     cost_usd: float
     latency_ms: int
-    overall_score: float | None
-    metrics: dict[str, float] | None
-    evaluation: dict[str, Any] | None
+    overall_score: Optional[float]
+    metrics: Optional[dict[str, float]]
+    evaluation: Optional[dict[str, Any]]
 
 
 class SectionProvenance(BaseModel):
@@ -335,7 +335,7 @@ class ConflictRecord(BaseModel):
     description: str
     competing_models: list[str]
     resolution: str
-    winner_model_id: str | None = None
+    winner_model_id: Optional[str] = None
 
 
 class OptimizationReport(BaseModel):
@@ -353,15 +353,15 @@ class ConsensusRead(BaseModel):
 
     id: uuid.UUID
     content: str
-    overall_score: float | None
-    metrics: dict[str, float] | None
-    evaluation: dict[str, Any] | None
+    overall_score: Optional[float]
+    metrics: Optional[dict[str, float]]
+    evaluation: Optional[dict[str, Any]]
     section_provenance: list[dict[str, Any]]
     conflicts: list[dict[str, Any]]
-    optimization_report: dict[str, Any] | None
+    optimization_report: Optional[dict[str, Any]]
     token_count: int
     tokens_saved: int
-    improvement_over_best: float | None
+    improvement_over_best: Optional[float]
 
 
 class RunSummary(BaseModel):
@@ -372,31 +372,31 @@ class RunSummary(BaseModel):
     target_domain: str
     status: str
     total_cost_usd: float
-    duration_ms: int | None
+    duration_ms: Optional[int]
     created_at: datetime
-    completed_at: datetime | None
+    completed_at: Optional[datetime]
 
 
 class RunDetail(RunSummary):
     business_problem: str
     constraints: list[str]
     requirements: list[str]
-    audience: str | None
-    output_format: str | None
+    audience: Optional[str]
+    output_format: Optional[str]
     selected_model_ids: list[str]
-    analysis: dict[str, Any] | None
-    error: str | None
+    analysis: Optional[dict[str, Any]]
+    error: Optional[str]
     total_input_tokens: int
     total_output_tokens: int
-    trace_id: str | None
+    trace_id: Optional[str]
     candidates: list[CandidateRead] = Field(default_factory=list)
-    consensus: ConsensusRead | None = None
+    consensus: Optional[ConsensusRead] = None
 
 
 class RunAccepted(BaseModel):
     run_id: uuid.UUID
     status: str
-    task_id: str | None = None
+    task_id: Optional[str] = None
     websocket_url: str
 
 
@@ -415,7 +415,7 @@ class SemanticSearchHit(BaseModel):
     target_domain: str
 
 
-class ExportFormat(StrEnum):
+class ExportFormat(str, Enum):
     MARKDOWN = "markdown"
     JSON = "json"
     YAML = "yaml"

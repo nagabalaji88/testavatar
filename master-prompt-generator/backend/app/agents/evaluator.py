@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -116,7 +116,7 @@ The metrics object MUST contain every metric key listed in the rubric, and nothi
 Output JSON only. No prose, no code fences."""
 
 
-@dataclass(slots=True)
+@dataclass
 class DeterministicSignal:
     scores: dict[str, float]
     findings: list[str]
@@ -141,7 +141,7 @@ def _scaled(hits: int, target: int, floor: float = 20.0) -> float:
 
 
 def analyze_deterministically(
-    content: str, analysis: RequirementAnalysis | None = None
+    content: str, analysis: Optional[RequirementAnalysis] = None
 ) -> DeterministicSignal:
     """Score a prompt on observable structural and safety features."""
     lowered = content.lower()
@@ -328,7 +328,7 @@ def _rubric_block() -> str:
 class PromptEvaluator:
     """Scores candidate prompts against the fifteen-criterion rubric."""
 
-    def __init__(self, service: LLMService | None = None) -> None:
+    def __init__(self, service: Optional[LLMService] = None) -> None:
         self._llm = service or llm_service
 
     async def evaluate(
@@ -337,8 +337,8 @@ class PromptEvaluator:
         prompt_id: str,
         content: str,
         business_problem: str,
-        analysis: RequirementAnalysis | None = None,
-    ) -> tuple[JudgeVerdict, LLMResult | None]:
+        analysis: Optional[RequirementAnalysis] = None,
+    ) -> tuple[JudgeVerdict, Optional[LLMResult]]:
         signal = analyze_deterministically(content, analysis)
         deterministic_verdict = self._verdict_from_signal(prompt_id, signal)
 

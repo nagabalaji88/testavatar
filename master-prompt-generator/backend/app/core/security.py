@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from enum import StrEnum
-from typing import Any, Final
+from enum import Enum
+from typing import Any, Final, Optional
 
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -23,7 +23,7 @@ oauth2_scheme = OAuth2PasswordBearer(
 )
 
 
-class Role(StrEnum):
+class Role(str, Enum):
     VIEWER = "viewer"
     ENGINEER = "engineer"
     ADMIN = "admin"
@@ -103,7 +103,7 @@ def decode_token(token: str, expected_type: str = "access") -> TokenPayload:
     return payload
 
 
-async def get_current_principal(token: str | None = Depends(oauth2_scheme)) -> Principal:
+async def get_current_principal(token: Optional[str] = Depends(oauth2_scheme)) -> Principal:
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -134,7 +134,7 @@ def require_role(required: Role):
     return _guard
 
 
-def authenticate_websocket(token: str | None) -> Principal:
+def authenticate_websocket(token: Optional[str]) -> Principal:
     """Verify a token supplied as a websocket query parameter."""
     if not token:
         raise HTTPException(

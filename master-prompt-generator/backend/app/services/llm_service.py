@@ -16,7 +16,16 @@ import random
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Iterable, Sequence, TypeVar
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Iterable,
+    Optional,
+    Sequence,
+    TypeVar,
+    Union,
+)
 
 import litellm
 from litellm.exceptions import (
@@ -67,7 +76,7 @@ class LLMError(RuntimeError):
         self.retryable = retryable
 
 
-@dataclass(slots=True)
+@dataclass
 class LLMResult:
     model_id: str
     model_name: str
@@ -78,7 +87,7 @@ class LLMResult:
     cost_usd: float
     latency_ms: int
     attempts: int
-    finish_reason: str | None = None
+    finish_reason: Optional[str] = None
     raw_metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -86,7 +95,7 @@ class LLMResult:
         return self.input_tokens + self.output_tokens
 
 
-@dataclass(slots=True)
+@dataclass
 class LLMFailure:
     model_id: str
     model_name: str
@@ -96,7 +105,7 @@ class LLMFailure:
     latency_ms: int
 
 
-def _api_key_for(provider: ProviderConfig) -> str | None:
+def _api_key_for(provider: ProviderConfig) -> Optional[str]:
     mapping = {
         "openai": settings.openai_api_key,
         "anthropic": settings.anthropic_api_key,
@@ -168,7 +177,7 @@ def estimate_tokens(text: str) -> int:
 class LLMService:
     """Async facade over LiteLLM with retries, metrics and concurrency control."""
 
-    def __init__(self, max_parallel: int | None = None) -> None:
+    def __init__(self, max_parallel: Optional[int] = None) -> None:
         self._semaphore = asyncio.Semaphore(
             max_parallel or settings.max_parallel_generations
         )
@@ -180,10 +189,10 @@ class LLMService:
         system_prompt: str,
         user_prompt: str,
         phase: str,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         json_mode: bool = False,
-        timeout: int | None = None,
+        timeout: Optional[int] = None,
     ) -> LLMResult:
         """Invoke a provider once, retrying transient failures."""
         messages = [
@@ -207,7 +216,7 @@ class LLMService:
             request["response_format"] = {"type": "json_object"}
 
         started = time.perf_counter()
-        last_error: Exception | None = None
+        last_error: Optional[Exception] = None
 
         async with self._semaphore:
             with span(
@@ -338,8 +347,8 @@ class LLMService:
         system_prompt: str,
         user_prompt: str,
         phase: str,
-        max_tokens: int | None = None,
-        timeout: int | None = None,
+        max_tokens: Optional[int] = None,
+        timeout: Optional[int] = None,
     ) -> tuple[dict[str, Any], LLMResult]:
         """Call a provider and parse a JSON object out of the response.
 
@@ -398,13 +407,13 @@ class LLMService:
         *,
         build_messages: Callable[[ProviderConfig], tuple[str, str]],
         phase: str,
-        on_start: Callable[[ProviderConfig], Awaitable[None]] | None = None,
-        on_success: Callable[[LLMResult], Awaitable[None]] | None = None,
-        on_failure: Callable[[LLMFailure], Awaitable[None]] | None = None,
+        on_start: Optional[Callable[[ProviderConfig], Awaitable[None]]] = None,
+        on_success: Optional[Callable[[LLMResult], Awaitable[None]]] = None,
+        on_failure: Optional[Callable[[LLMFailure], Awaitable[None]]] = None,
     ) -> tuple[list[LLMResult], list[LLMFailure]]:
         """Execute providers concurrently, isolating per-provider failures."""
 
-        async def _run(provider: ProviderConfig) -> LLMResult | LLMFailure:
+        async def _run(provider: ProviderConfig) -> Union[LLMResult, LLMFailure]:
             if on_start is not None:
                 await on_start(provider)
             system_prompt, user_prompt = build_messages(provider)

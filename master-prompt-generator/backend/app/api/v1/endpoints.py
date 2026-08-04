@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 
 from fastapi import (
     APIRouter,
@@ -231,7 +231,7 @@ async def create_run(
         ],
     )
 
-    task_id: str | None = None
+    task_id: Optional[str] = None
     try:
         from app.workers.celery_app import execute_pipeline_task
 
@@ -272,7 +272,7 @@ async def list_runs(
     principal: CurrentUser,
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    run_status: str | None = Query(default=None, alias="status"),
+    run_status: Optional[str] = Query(default=None, alias="status"),
 ) -> list[PromptRun]:
     query = select(PromptRun).order_by(PromptRun.created_at.desc())
     if not principal.has_at_least(Role.ADMIN):
@@ -393,7 +393,7 @@ async def export_run(
     run_id: uuid.UUID,
     session: SessionDep,
     principal: CurrentUser,
-    payload: ExportRequest | None = Body(default=None),
+    payload: Optional[ExportRequest] = Body(default=None),
 ) -> Response:
     run = await _load_run(session, run_id)
     _authorize_run(run, principal)

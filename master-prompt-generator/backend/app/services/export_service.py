@@ -14,7 +14,7 @@ from app.models.domain import ConsensusPrompt, PromptRun
 from app.models.schemas import ExportFormat
 
 
-@dataclass(slots=True)
+@dataclass
 class ExportArtifact:
     filename: str
     media_type: str
