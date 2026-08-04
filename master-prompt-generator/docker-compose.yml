@@ -1,0 +1,129 @@
+name: master-prompt-generator
+
+x-backend-env: &backend-env
+  ENVIRONMENT: ${ENVIRONMENT:-local}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mpg}:${POSTGRES_PASSWORD:-mpg}@postgres:5432/${POSTGRES_DB:-mpg}
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  QDRANT_URL: http://qdrant:6333
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:-please-change-this-secret}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8080}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  OTEL_ENABLED: ${OTEL_ENABLED:-false}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mpg}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mpg}
+      POSTGRES_DB: ${POSTGRES_DB:-mpg}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-mpg} -d ${POSTGRES_DB:-mpg}']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - redis-data:/data
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 4s
+      retries: 6
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+    volumes:
+      - qdrant-data:/qdrant/storage
+    ports:
+      - '${QDRANT_PORT:-6333}:6333'
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment: *backend-env
+    volumes:
+      # Providers are configured declaratively; mounting the file lets operators
+      # add models without rebuilding the image.
+      - ./backend/config:/srv/config
+    ports:
+      - '${BACKEND_PORT:-8000}:8000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command:
+      - celery
+      - -A
+      - app.workers.celery_app.celery_app
+      - worker
+      - --loglevel=info
+      - --concurrency=${CELERY_CONCURRENCY:-4}
+      - --without-gossip
+      - --without-mingle
+    environment: *backend-env
+    volumes:
+      - ./backend/config:/srv/config
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'celery -A app.workers.celery_app.celery_app inspect ping -d celery@$$HOSTNAME']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api/v1
+    restart: unless-stopped
+    ports:
+      - '${FRONTEND_PORT:-8080}:80'
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  postgres-data:
+  redis-data:
+  qdrant-data:

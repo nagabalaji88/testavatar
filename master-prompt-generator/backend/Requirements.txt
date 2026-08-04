@@ -1,0 +1,42 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+email-validator==2.2.0
+python-multipart==0.0.20
+
+# Orchestration
+langgraph==0.2.60
+langchain-core==0.3.28
+litellm==1.55.9
+
+# Persistence
+sqlmodel==0.0.22
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+greenlet==3.1.1
+
+# Queue / cache
+celery[redis]==5.4.0
+redis==5.2.1
+
+# Vector store
+qdrant-client==1.12.1
+
+# Security
+pyjwt==2.10.1
+passlib[argon2]==1.7.4
+argon2-cffi==23.1.0
+
+# Observability
+opentelemetry-api==1.29.0
+opentelemetry-sdk==1.29.0
+opentelemetry-exporter-otlp-proto-http==1.29.0
+opentelemetry-instrumentation-fastapi==0.50b0
+prometheus-client==0.21.1
+
+# Utilities
+httpx==0.27.2
+pyyaml==6.0.2
+tenacity==9.0.0
