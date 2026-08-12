@@ -226,6 +226,8 @@ export const useRunStore = create<RunState>((set, get) => ({
           section_provenance:
             (payload.section_provenance as ConsensusPrompt['section_provenance']) ?? [],
           conflicts: (payload.conflicts as ConsensusPrompt['conflicts']) ?? [],
+          reinforcements:
+            (payload.reinforcements as ConsensusPrompt['reinforcements']) ?? [],
           optimization_report:
             (payload.optimization_report as ConsensusPrompt['optimization_report']) ??
             null,

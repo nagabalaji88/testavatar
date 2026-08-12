@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import Editor, { type Monaco } from '@monaco-editor/react';
 import { motion } from 'framer-motion';
-import { Check, Copy, Download, Merge, Scale, Sparkles } from 'lucide-react';
+import { Check, Copy, Download, Merge, Scale, ShieldPlus, Sparkles } from 'lucide-react';
 import type { ConsensusPrompt } from '@/types';
 import { GlassCard, SectionHeader } from '@/components/ui/GlassCard';
 import { Button } from '@/components/ui/Button';
@@ -11,6 +11,15 @@ import { api } from '@/services/api';
 import { formatNumber } from '@/lib/utils';
 
 const EXPORT_FORMATS = ['markdown', 'json', 'yaml', 'xml', 'python', 'typescript'] as const;
+
+const STRATEGY_TONE: Record<string, 'neutral' | 'info' | 'success' | 'accent' | 'warning'> = {
+  adopted: 'neutral',
+  deduplicated: 'neutral',
+  merged: 'accent',
+  unanimous: 'success',
+  reinforced: 'info',
+  synthesized: 'warning',
+};
 
 function defineTheme(monaco: Monaco): void {
   monaco.editor.defineTheme('mpg-glass-single', {
@@ -105,6 +114,12 @@ export function ConsensusPanel({
               <Scale className="size-3" />
               {consensus.conflicts.length} conflicts resolved
             </Badge>
+            {consensus.reinforcements.length ? (
+              <Badge tone="accent">
+                <ShieldPlus className="size-3" />
+                {consensus.reinforcements.length} gaps closed
+              </Badge>
+            ) : null}
             <Badge tone="neutral">{formatNumber(consensus.token_count)} tokens</Badge>
             {consensus.tokens_saved > 0 ? (
               <Badge tone="success">
@@ -176,6 +191,7 @@ export function ConsensusPanel({
                   <th scope="col" className="pb-2 font-medium">Winning model</th>
                   <th scope="col" className="pb-2 font-medium">Score</th>
                   <th scope="col" className="pb-2 font-medium">Strategy</th>
+                  <th scope="col" className="pb-2 font-medium">Directives</th>
                   <th scope="col" className="pb-2 font-medium">Merged from</th>
                 </tr>
               </thead>
@@ -194,9 +210,17 @@ export function ConsensusPanel({
                       {item.score.toFixed(1)}
                     </td>
                     <td className="py-2 pr-3">
-                      <Badge tone={item.strategy === 'merged' ? 'accent' : 'neutral'}>
+                      <Badge tone={STRATEGY_TONE[item.strategy] ?? 'neutral'}>
                         {item.strategy}
                       </Badge>
+                    </td>
+                    <td className="py-2 pr-3 text-faint">
+                      {item.directive_count}
+                      {item.unanimous_count > 0 ? (
+                        <span className="ml-1.5 text-mint-400">
+                          ({item.unanimous_count} agreed)
+                        </span>
+                      ) : null}
                     </td>
                     <td className="py-2 text-faint">
                       {item.merged_from.length ? item.merged_from.join(', ') : '—'}
@@ -234,6 +258,35 @@ export function ConsensusPanel({
                 </div>
                 <p className="text-dim">{conflict.description}</p>
                 <p className="mt-1 text-[11.5px] text-faint">→ {conflict.resolution}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {consensus.reinforcements.length ? (
+        <div className="px-5 pb-5">
+          <h3 className="mb-1 text-[12px] font-medium text-dim">
+            Engine reinforcements
+          </h3>
+          <p className="mb-2 text-[11.5px] text-faint">
+            Production directives no candidate model supplied — merging alone could
+            not have produced these.
+          </p>
+          <ul className="space-y-2">
+            {consensus.reinforcements.map((item) => (
+              <li key={item.id} className="glass-inset rounded-xl p-3 text-[12px]">
+                <div className="mb-1 flex items-center gap-2">
+                  <Badge tone="accent">
+                    <ShieldPlus className="size-3" />
+                    {item.id.replace(/_/g, ' ')}
+                  </Badge>
+                  <span className="font-medium text-white/90">{item.section}</span>
+                </div>
+                <p className="text-dim">{item.rationale}</p>
+                <p className="mt-1 font-mono text-[11px] leading-relaxed text-faint">
+                  {item.directive}
+                </p>
               </li>
             ))}
           </ul>

@@ -496,6 +496,9 @@ def build_nodes(deps: PipelineDependencies):
                 record.conflicts = [
                     item.model_dump(mode="json") for item in result.conflicts
                 ]
+                record.reinforcements = [
+                    item.model_dump(mode="json") for item in result.reinforcements
+                ]
                 record.optimization_report = result.optimization.model_dump(mode="json")
                 record.token_count = result.token_count
                 record.tokens_saved = result.optimization.tokens_saved
@@ -512,6 +515,7 @@ def build_nodes(deps: PipelineDependencies):
                 detail={
                     "conflicts": len(result.conflicts),
                     "sections": len(result.provenance),
+                    "reinforcements": len(result.reinforcements),
                     "improvement_over_best": improvement,
                 },
             )
@@ -525,6 +529,9 @@ def build_nodes(deps: PipelineDependencies):
                     item.model_dump(mode="json") for item in result.provenance
                 ],
                 "conflicts": [item.model_dump(mode="json") for item in result.conflicts],
+                "reinforcements": [
+                    item.model_dump(mode="json") for item in result.reinforcements
+                ],
                 "optimization_report": result.optimization.model_dump(mode="json"),
                 "token_count": result.token_count,
                 "tokens_saved": result.optimization.tokens_saved,

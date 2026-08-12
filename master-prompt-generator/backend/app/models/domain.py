@@ -143,6 +143,9 @@ class ConsensusPrompt(SQLModel, table=True):
     conflicts: list[dict[str, Any]] = Field(
         default_factory=list, sa_column=Column(JSONB)
     )
+    reinforcements: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSONB)
+    )
     optimization_report: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSONB)
     )

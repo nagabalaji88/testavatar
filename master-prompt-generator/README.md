@@ -115,10 +115,30 @@ Four deterministic phases, each pure and unit-tested:
    duplicate threshold: "escalate below 0.7" and "escalate below 0.9" are 0.99
    similar and are a conflict, not a restatement. Losing directives are removed
    from the body, not merely annotated.
-3. **Merge** — adopt the strongest variant per section, then graft in directives
-   from other models that are neither duplicates nor conflict losers.
-4. **Optimize** — deduplicate lines, collapse whitespace runs, normalise heading
+3. **Merge — directive level, not section level.** Taking one model's section
+   wholesale discards a better-worded version of the same rule from another
+   model, and throws away the strongest signal available: that several models
+   independently arrived at the same instruction. Instead, equivalent
+   directives are clustered across models; each cluster keeps the **best
+   phrasing** and records its **support** (how many models produced it).
+   Directives are scored on specificity, measurability, imperative phrasing and
+   absence of hedging, then ranked by `0.45×quality + 0.30×authority +
+   0.25×support`. Agreement rescues a merely-adequate directive; quality
+   rescues a unique one; a directive with neither is cut. Bullet lists are
+   re-ordered strongest-first (they are unordered by nature); prose keeps
+   document order.
+4. **Reinforce** — merging can only be as good as its inputs, so when *every*
+   candidate omits a production concern the merged prompt inherits that blind
+   spot. Six rules detect the omission and close it with a curated directive:
+   injection defence, grounding/abstention, failure paths, PII handling,
+   determinism and scope boundaries. Additions are capped at four and reported
+   with a rationale. Two or more directives targeting a missing section create
+   that section in canonical order rather than piling into a fallback.
+5. **Optimize** — deduplicate lines, collapse whitespace runs, normalise heading
    levels and strip filler, preserving fenced code blocks verbatim.
+
+Reinforcement is what lifts the consensus *above* the best single model rather
+than merely matching it.
 
 An LLM polish pass then smooths the prose. It is **rejected** if it drops a
 heading or compresses below 55% of the merged length, so synthesis can never
@@ -194,13 +214,15 @@ npm run dev
 ## Tests
 
 ```bash
-cd backend && python -m pytest tests      # 26 tests, consensus + judge logic
+cd backend && python -m pytest tests      # 38 tests, consensus + judge logic
 cd frontend && npm run typecheck && npm run build
 ```
 
 The suite covers the deterministic engine paths — section parsing, similarity,
-all three conflict kinds, merge provenance, the single-output-contract
-invariant, the optimizer, and the rule-engine scorer. Network-dependent agent
+all three conflict kinds, directive scoring, cluster support and best-phrasing
+selection, the solo-directive floor, merge provenance, the
+single-output-contract invariant, reinforcement placement and capping, the
+optimizer, and the rule-engine scorer. Network-dependent agent
 paths are exercised through their fallbacks.
 
 ## API surface

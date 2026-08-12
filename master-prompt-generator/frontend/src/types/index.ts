@@ -100,7 +100,23 @@ export interface SectionProvenance {
   source_model_name: string;
   score: number;
   merged_from: string[];
-  strategy: 'adopted' | 'merged' | 'synthesized' | 'deduplicated';
+  strategy:
+    | 'adopted'
+    | 'merged'
+    | 'synthesized'
+    | 'deduplicated'
+    | 'unanimous'
+    | 'reinforced';
+  directive_count: number;
+  unanimous_count: number;
+}
+
+/** A directive the engine added because no candidate model supplied it. */
+export interface ReinforcementRecord {
+  id: string;
+  section: string;
+  directive: string;
+  rationale: string;
 }
 
 export interface ConflictRecord {
@@ -130,6 +146,7 @@ export interface ConsensusPrompt {
   evaluation: JudgeVerdict | null;
   section_provenance: SectionProvenance[];
   conflicts: ConflictRecord[];
+  reinforcements: ReinforcementRecord[];
   optimization_report: OptimizationReport | null;
   token_count: number;
   tokens_saved: number;

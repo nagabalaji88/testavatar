@@ -326,7 +326,20 @@ class SectionProvenance(BaseModel):
     source_model_name: str
     score: float
     merged_from: list[str] = Field(default_factory=list)
-    strategy: Literal["adopted", "merged", "synthesized", "deduplicated"] = "adopted"
+    strategy: Literal[
+        "adopted", "merged", "synthesized", "deduplicated", "unanimous", "reinforced"
+    ] = "adopted"
+    directive_count: int = 0
+    unanimous_count: int = 0
+
+
+class ReinforcementRecord(BaseModel):
+    """A directive the engine added because no candidate supplied it."""
+
+    id: str
+    section: str
+    directive: str
+    rationale: str
 
 
 class ConflictRecord(BaseModel):
@@ -358,6 +371,7 @@ class ConsensusRead(BaseModel):
     evaluation: Optional[dict[str, Any]]
     section_provenance: list[dict[str, Any]]
     conflicts: list[dict[str, Any]]
+    reinforcements: list[dict[str, Any]] = Field(default_factory=list)
     optimization_report: Optional[dict[str, Any]]
     token_count: int
     tokens_saved: int
