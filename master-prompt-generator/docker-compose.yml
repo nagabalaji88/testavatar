@@ -12,6 +12,22 @@ x-backend-env: &backend-env
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GROQ_API_KEY: ${GROQ_API_KEY:-}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
+  # Open-source stack. Point MODEL_CONFIG_PATH at models.local.json (see the
+  # `local` profile) to run entirely on open-weight models with no API keys.
+  MODEL_CONFIG_PATH: ${MODEL_CONFIG_PATH:-/srv/config/models.json}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+  ANALYZER_MODEL_ID: ${ANALYZER_MODEL_ID:-openai-gpt4o}
+  JUDGE_MODEL_ID: ${JUDGE_MODEL_ID:-anthropic-claude-sonnet}
+  CONSENSUS_MODEL_ID: ${CONSENSUS_MODEL_ID:-anthropic-claude-sonnet}
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+  EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+  GENERATION_TIMEOUT_SECONDS: ${GENERATION_TIMEOUT_SECONDS:-180}
+  JUDGE_TIMEOUT_SECONDS: ${JUDGE_TIMEOUT_SECONDS:-120}
+  MAX_PARALLEL_GENERATIONS: ${MAX_PARALLEL_GENERATIONS:-8}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   OTEL_ENABLED: ${OTEL_ENABLED:-false}
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
@@ -57,6 +73,51 @@ services:
       - qdrant-data:/qdrant/storage
     ports:
       - '${QDRANT_PORT:-6333}:6333'
+
+  # --- Open-source inference (profile: local) -----------------------------
+  # Serves open-weight models from your own hardware. No API key, no per-token
+  # cost. Started only with `--profile local`, because the images and model
+  # weights are several GB and are pure waste for an API-key deployment.
+  ollama:
+    image: ollama/ollama:0.5.4
+    profiles: ['local']
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-10m}
+      # Serialised by default: three 7B models answering at once will thrash a
+      # machine without a GPU. Raise it if you have the VRAM.
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-3}
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - '${OLLAMA_PORT:-11434}:11434'
+    healthcheck:
+      test: ['CMD-SHELL', 'ollama list >/dev/null 2>&1 || exit 1']
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # One-shot: pulls the weights the local registry references, then exits.
+  ollama-pull:
+    image: ollama/ollama:0.5.4
+    profiles: ['local']
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -e
+        for model in ${OLLAMA_MODELS:-qwen2.5:7b-instruct llama3.1:8b-instruct-q4_K_M mistral:7b-instruct nomic-embed-text}; do
+          echo "pulling $$model"
+          ollama pull "$$model"
+        done
+        echo "all models ready"
+    restart: 'no'
 
   backend:
     build:
@@ -127,3 +188,4 @@ volumes:
   postgres-data:
   redis-data:
   qdrant-data:
+  ollama-models:

@@ -20,8 +20,26 @@ from app.models.schemas import SemanticSearchHit
 logger = get_logger(__name__)
 
 
-def _embedding_api_key() -> Optional[str]:
-    return settings.openai_api_key
+def _embedding_request() -> Optional[dict[str, Any]]:
+    """Build the LiteLLM kwargs for the configured embedding backend.
+
+    Returns None when embeddings are unavailable, which disables semantic
+    search without affecting the generation pipeline.
+    """
+    provider = settings.embedding_provider
+    if provider == "disabled":
+        return None
+
+    if provider == "ollama":
+        # Fully local and key-free; the model must be pulled on the Ollama host.
+        return {
+            "model": settings.embedding_model,
+            "api_base": settings.ollama_base_url,
+        }
+
+    if not settings.openai_api_key:
+        return None
+    return {"model": settings.embedding_model, "api_key": settings.openai_api_key}
 
 
 class VectorService:
@@ -70,14 +88,11 @@ class VectorService:
             return False
 
     async def embed(self, text: str) -> Optional[list[float]]:
-        if not _embedding_api_key():
+        request = _embedding_request()
+        if request is None:
             return None
         try:
-            response = await litellm.aembedding(
-                model=settings.embedding_model,
-                input=[text[:8000]],
-                api_key=_embedding_api_key(),
-            )
+            response = await litellm.aembedding(input=[text[:8000]], **request)
             return list(response["data"][0]["embedding"])
         except Exception as exc:
             logger.warning("embedding_failed", extra={"error": str(exc)})

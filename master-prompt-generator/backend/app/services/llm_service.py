@@ -105,14 +105,48 @@ class LLMFailure:
     latency_ms: int
 
 
+# Runtimes that serve open-weight models from your own hardware. They take no
+# credential, so a missing key must not be treated as a misconfiguration.
+LOCAL_PROVIDERS = frozenset({"ollama", "vllm", "llamacpp", "llama.cpp", "local", "lmstudio"})
+
+
 def _api_key_for(provider: ProviderConfig) -> Optional[str]:
     mapping = {
         "openai": settings.openai_api_key,
         "anthropic": settings.anthropic_api_key,
         "google": settings.gemini_api_key,
         "gemini": settings.gemini_api_key,
+        "groq": settings.groq_api_key,
+        "openrouter": settings.openrouter_api_key,
+        "together": settings.together_api_key,
+        "togetherai": settings.together_api_key,
+        "huggingface": settings.huggingface_api_key,
     }
     return mapping.get(provider.provider.strip().lower())
+
+
+def _api_base_for(provider: ProviderConfig) -> Optional[str]:
+    """Resolve the endpoint, defaulting local runtimes to their configured host.
+
+    An explicit api_base in the registry always wins, so a single models.json
+    can be pointed at a remote GPU box without touching code.
+    """
+    if provider.api_base:
+        return provider.api_base
+
+    name = provider.provider.strip().lower()
+    if name == "ollama":
+        return settings.ollama_base_url
+    if name in {"vllm", "llamacpp", "llama.cpp", "lmstudio", "local"}:
+        return settings.vllm_base_url
+    return None
+
+
+def requires_credential(provider: ProviderConfig) -> bool:
+    """True when the provider needs an API key that is not currently set."""
+    if provider.provider.strip().lower() in LOCAL_PROVIDERS:
+        return False
+    return _api_key_for(provider) is None
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
@@ -210,8 +244,8 @@ class LLMService:
         }
         if api_key := _api_key_for(provider):
             request["api_key"] = api_key
-        if provider.api_base:
-            request["api_base"] = provider.api_base
+        if api_base := _api_base_for(provider):
+            request["api_base"] = api_base
         if json_mode and provider.supports_json_mode:
             request["response_format"] = {"type": "json_object"}
 

@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://qdrant:6333"
     qdrant_api_key: Optional[str] = None
     qdrant_collection: str = "mpg_prompts"
+
+    # Embeddings. "ollama" keeps the whole stack open-source and key-free;
+    # switching provider changes the vector width, so the collection must be
+    # recreated when this changes.
+    embedding_provider: Literal["openai", "ollama", "disabled"] = "openai"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 
@@ -56,6 +61,20 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
+
+    # Hosted gateways that serve open-weight models. Both are optional; the
+    # Ollama path below needs no credential at all.
+    groq_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
+    together_api_key: Optional[str] = None
+    huggingface_api_key: Optional[str] = None
+
+    # --- Local open-source inference --------------------------------------
+    # Providers whose `provider` field names a local runtime inherit this base
+    # URL unless the registry entry overrides it, so the same models.json works
+    # inside Compose (http://ollama:11434) and on a workstation (localhost).
+    ollama_base_url: str = "http://ollama:11434"
+    vllm_base_url: Optional[str] = None
 
     # --- Orchestration tuning --------------------------------------------
     model_config_path: Path = BACKEND_ROOT / "config" / "models.json"

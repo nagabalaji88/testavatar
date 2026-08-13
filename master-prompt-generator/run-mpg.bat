@@ -5,6 +5,7 @@ REM
 REM  Usage:  run-mpg.bat [command]
 REM
 REM    up        Build and start the full stack   (default)
+REM    local     Start with free open-source models (Ollama, no API keys)
 REM    down      Stop the stack, keep the data
 REM    restart   Recreate the application containers
 REM    rebuild   Force a no-cache rebuild, then start
@@ -51,6 +52,7 @@ call :resolve_compose || goto :end
 call :load_env        || goto :end
 
 if /i "%CMD%"=="up"      goto :cmd_up
+if /i "%CMD%"=="local"   goto :cmd_local
 if /i "%CMD%"=="down"    goto :cmd_down
 if /i "%CMD%"=="restart" goto :cmd_restart
 if /i "%CMD%"=="rebuild" goto :cmd_rebuild
@@ -216,6 +218,57 @@ if errorlevel 1 goto :compose_failed
 goto :wait_and_open
 
 
+:cmd_local
+echo.
+echo  Starting the open-source stack: open-weight models served locally by
+echo  Ollama. No API keys and no per-token cost.
+echo.
+echo  [warn]  The first run downloads roughly 12 GB of model weights, and on a
+echo          machine without a GPU a single consensus run can take tens of
+echo          minutes. See .env.local.example for smaller model options.
+echo.
+if not exist ".env.local.example" (
+    echo  [ERROR] .env.local.example is missing - run from the project folder.
+    set "EXIT_CODE=1"
+    goto :end
+)
+
+findstr /b /c:"MODEL_CONFIG_PATH=/srv/config/models.local.json" ".env" >nul 2>&1
+if errorlevel 1 (
+    echo  [info]  Your .env is not configured for the local stack.
+    echo          .env.local.example will be copied over it; the current .env
+    echo          is kept as .env.backup
+    echo.
+    choice /c YN /n /m "         Continue? [Y/N] "
+    if errorlevel 2 (
+        echo.
+        echo  Cancelled. To do it by hand: copy .env.local.example to .env
+        goto :end
+    )
+    if exist ".env" copy /y ".env" ".env.backup" >nul
+    copy /y ".env.local.example" ".env" >nul
+    call :generate_secret
+    echo.
+)
+
+echo  Building and starting services with the 'local' profile...
+echo.
+%COMPOSE% --profile local up -d --build
+if errorlevel 1 goto :compose_failed
+
+echo.
+echo  Pulling model weights - the slow part of a first run...
+echo.
+%COMPOSE% --profile local run --rm ollama-pull
+if errorlevel 1 (
+    echo.
+    echo  [warn]  Model pull reported an error. Check connectivity and retry:
+    echo            run-mpg.bat local
+    echo.
+)
+goto :wait_and_open
+
+
 :cmd_rebuild
 call :check_api_keys || goto :end
 echo.
@@ -239,7 +292,7 @@ goto :wait_and_open
 :cmd_down
 echo  Stopping the stack (data volumes are preserved)...
 echo.
-%COMPOSE% down
+%COMPOSE% --profile local down
 if errorlevel 1 goto :compose_failed
 echo.
 echo  [ok]    Stopped. Your database and vector index are still on disk.
@@ -249,14 +302,14 @@ goto :end
 :cmd_logs
 echo  Tailing logs - press Ctrl+C to stop.
 echo.
-%COMPOSE% logs -f --tail=120
+%COMPOSE% --profile local logs -f --tail=120
 goto :end
 
 
 :cmd_status
 echo  Container state:
 echo.
-%COMPOSE% ps
+%COMPOSE% --profile local ps
 echo.
 echo  Backend health:
 curl -fsS "http://localhost:%BACKEND_PORT%/api/v1/health"
@@ -293,7 +346,7 @@ if errorlevel 2 (
     goto :end
 )
 echo.
-%COMPOSE% down -v --remove-orphans
+%COMPOSE% --profile local down -v --remove-orphans
 if errorlevel 1 goto :compose_failed
 echo.
 echo  [ok]    Stack removed and all volumes deleted.
@@ -372,6 +425,7 @@ goto :end
 echo  Usage:  run-mpg.bat [command]
 echo.
 echo    up        Build and start the full stack   (default)
+echo    local     Start with free open-source models (Ollama, no API keys)
 echo    down      Stop the stack, keep the data
 echo    restart   Recreate the application containers
 echo    rebuild   Force a no-cache rebuild, then start

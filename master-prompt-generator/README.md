@@ -176,6 +176,59 @@ latency get one axis each — never a dual-axis chart.
 > scripts pass `--config Vite.config.ts` explicitly (Vite only auto-detects the
 > lowercase name).
 
+## Running on free, open-source models
+
+The whole pipeline can run on open-weight models served from your own hardware,
+with **no API keys and no per-token cost**:
+
+```bash
+cp .env.local.example .env
+docker compose --profile local up --build
+docker compose --profile local run --rm ollama-pull   # first run only
+```
+
+or on Windows, `run-mpg.bat local` — which does all three steps, including
+copying the env file and generating a secret.
+
+This starts an [Ollama](https://ollama.com) service and points the backend at
+`backend/config/models.local.json`, which fans out across **Qwen2.5 7B**,
+**Llama 3.1 8B** and **Mistral 7B**, with Gemma 2 and DeepSeek-R1 available but
+disabled. Embeddings switch to `nomic-embed-text`, so semantic search stays
+local too. Every provider reports `cost_per_1k = 0`, so the dashboard's spend
+tiles read `$0.00` rather than showing invented numbers.
+
+### What this costs you instead of money
+
+- **Disk:** roughly 12 GB of weights on first pull.
+- **Time:** a 7B model on CPU takes minutes per prompt. A three-model consensus
+  run can take tens of minutes. The local env therefore sets
+  `MAX_PARALLEL_GENERATIONS=1` — Ollama answers one request at a time by
+  default, so firing three at it concurrently just makes all three time out
+  together. With a GPU, raise `OLLAMA_NUM_PARALLEL` and that limit together.
+- **Quality:** 7B open models produce weaker prompts than frontier models. The
+  consensus engine partly compensates — its reinforcement phase adds the
+  production directives small models routinely omit — but do not expect parity.
+
+On a CPU-only machine, switch to 3B weights (`qwen2.5:3b-instruct`,
+`llama3.2:3b-instruct-q4_K_M`) and edit `models.local.json` to match; a run then
+finishes in minutes.
+
+### Hosted gateways for open models
+
+`models.local.json` also carries a disabled **Llama 3.3 70B via Groq** entry.
+Groq, OpenRouter and Together all serve open-weight models on free tiers and are
+far faster than local CPU inference. Set `GROQ_API_KEY` (or the OpenRouter /
+Together equivalent) and flip `enabled` to `true`. The models stay open source;
+only the hosting is someone else's.
+
+### Mixing open and hosted models
+
+Nothing forces an all-or-nothing choice. Copy entries between the two registry
+files — the ids are deliberately disjoint — and set `ANALYZER_MODEL_ID`,
+`JUDGE_MODEL_ID` and `CONSENSUS_MODEL_ID` to whichever ids you want driving each
+stage. A common split is local models for the fan-out and a stronger hosted
+model as the judge.
+
 ## Configuring models
 
 `backend/config/models.json` is the source of truth and is mounted into both the
