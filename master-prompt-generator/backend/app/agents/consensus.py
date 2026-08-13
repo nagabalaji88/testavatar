@@ -122,8 +122,21 @@ STOPWORDS = frozenset(
     must should will can may from at into than then when where which who whom while""".split()
 )
 
+# Two directives are "about the same subject" at or above this score; whether
+# that makes them duplicates or contradictions is then decided by polarity and
+# numeric checks. Measured against real multi-model output: paraphrases of one
+# rule score 0.64-0.68 ("Classify every inbound notice into exactly one of the
+# four severity tiers" vs "Classify each notice into one of four severity
+# tiers" = 0.68), while genuinely distinct directives score 0.08-0.12. The
+# threshold sits in that gap with margin on both sides.
+SIMILARITY_SUBJECT = 0.55
+SIMILARITY_CONFLICT = SIMILARITY_SUBJECT
+
+# Near-verbatim restatement. Used for cheap exact-ish dedupe, not for deciding
+# whether two directives express the same rule -- an earlier version clustered
+# at this level and so never detected agreement between models that worded the
+# same instruction differently, which is the normal case.
 SIMILARITY_DUPLICATE = 0.86
-SIMILARITY_CONFLICT = 0.55
 
 # --- Directive quality signals --------------------------------------------
 
@@ -809,7 +822,7 @@ def cluster_directives(
             for cluster in clusters:
                 if cluster.is_code != is_code:
                     continue
-                if similarity(stripped, cluster.representative.text) >= SIMILARITY_DUPLICATE:
+                if similarity(stripped, cluster.representative.text) >= SIMILARITY_SUBJECT:
                     cluster.members.append(directive)
                     placed = True
                     break
