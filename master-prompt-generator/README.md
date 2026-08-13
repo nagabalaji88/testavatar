@@ -32,14 +32,23 @@ resolved rather than concatenated.
 **Windows** — double-click `run-mpg.bat`, or from a console:
 
 ```bat
-run-mpg.bat            :: build and start everything
+run-mpg.bat            :: auto-detect and start
+run-mpg.bat local      :: force the free open-source stack (Ollama)
+run-mpg.bat up         :: force the API-key stack
 run-mpg.bat logs       :: tail the pipeline logs
 run-mpg.bat down       :: stop, keeping the data
 run-mpg.bat help       :: all commands
 ```
 
-It checks Docker, creates `.env` from `.env.example` on first run with a
-randomly generated `JWT_SECRET_KEY`, warns if no provider API key is set, waits
+With no argument it picks the stack from what is actually configured:
+
+| `.env` state | What starts |
+| --- | --- |
+| Points at `models.local.json` | Free open-source stack |
+| Has an OpenAI / Anthropic / Gemini key | API-key stack |
+| Neither | Asks, defaulting to free and open source |
+
+It also checks Docker, generates a random `JWT_SECRET_KEY` on first run, waits
 for the API to report healthy, then opens the dashboard.
 
 **macOS / Linux**

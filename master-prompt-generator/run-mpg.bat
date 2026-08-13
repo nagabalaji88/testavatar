@@ -4,8 +4,12 @@ REM  Master Prompt Generator - single-file launcher for Windows
 REM
 REM  Usage:  run-mpg.bat [command]
 REM
-REM    up        Build and start the full stack   (default)
-REM    local     Start with free open-source models (Ollama, no API keys)
+REM  With no command it starts automatically: the free open-source stack
+REM  when no API keys are configured, your API-key stack when they are.
+REM
+REM    (none)    Auto-detect and start          (default)
+REM    up        Start using API-key providers  (OpenAI / Anthropic / Gemini)
+REM    local     Start using free open-source models (Ollama, no API keys)
 REM    down      Stop the stack, keep the data
 REM    restart   Recreate the application containers
 REM    rebuild   Force a no-cache rebuild, then start
@@ -35,7 +39,7 @@ REM Delayed expansion keeps any ^& or ^| in the command line from being parsed.
 echo !CMDCMDLINE! | findstr /i /c:"/c" >nul 2>&1 && set "LAUNCHED_BY_EXPLORER=1"
 
 set "CMD=%~1"
-if "%CMD%"=="" set "CMD=up"
+if "%CMD%"=="" set "CMD=auto"
 
 echo.
 echo  ==========================================================
@@ -51,6 +55,7 @@ call :check_docker    || goto :end
 call :resolve_compose || goto :end
 call :load_env        || goto :end
 
+if /i "%CMD%"=="auto"    goto :cmd_auto
 if /i "%CMD%"=="up"      goto :cmd_up
 if /i "%CMD%"=="local"   goto :cmd_local
 if /i "%CMD%"=="down"    goto :cmd_down
@@ -207,6 +212,55 @@ exit /b 0
 REM ------------------------------------------------------------------
 REM  Commands
 REM ------------------------------------------------------------------
+:cmd_auto
+REM Choose the stack from what is actually configured, so a double-click just
+REM works. Explicit `up` / `local` always override this.
+call :detect_mode
+
+if /i "!MODE!"=="local" (
+    echo  [ok]    .env is configured for the open-source stack.
+    goto :cmd_local
+)
+if /i "!MODE!"=="cloud" (
+    echo  [ok]    API provider keys found in .env.
+    goto :cmd_up
+)
+
+echo  No provider is configured yet. Choose how to run:
+echo.
+echo    [1] Free and open source  - runs Qwen2.5, Llama 3.1 and Mistral on
+echo        this machine via Ollama. No API keys, no cost. Downloads about
+echo        12 GB on first start and is slow without a GPU.
+echo.
+echo    [2] API providers         - OpenAI, Anthropic and Gemini. Fast and
+echo        higher quality, but you must paste keys into .env and pay per run.
+echo.
+choice /c 12 /n /m "  Select [1/2]: "
+echo.
+if errorlevel 2 (
+    echo  Add your keys to .env, then run: run-mpg.bat up
+    echo.
+    if not exist ".env" copy /y ".env.example" ".env" >nul
+    start "" notepad ".env"
+    goto :end
+)
+set "LOCAL_CONFIRMED=1"
+goto :cmd_local
+
+
+:detect_mode
+REM local wins: an .env already pointed at the open-source registry is an
+REM explicit choice, even if stale keys are still sitting in the file.
+set "MODE="
+if not exist ".env" exit /b 0
+findstr /b /c:"MODEL_CONFIG_PATH=/srv/config/models.local.json" ".env" >nul 2>&1 && set "MODE=local"
+if defined MODE exit /b 0
+findstr /r /c:"^OPENAI_API_KEY=..*"    ".env" >nul 2>&1 && set "MODE=cloud"
+findstr /r /c:"^ANTHROPIC_API_KEY=..*" ".env" >nul 2>&1 && set "MODE=cloud"
+findstr /r /c:"^GEMINI_API_KEY=..*"    ".env" >nul 2>&1 && set "MODE=cloud"
+exit /b 0
+
+
 :cmd_up
 call :check_api_keys || goto :end
 echo.
@@ -235,12 +289,11 @@ if not exist ".env.local.example" (
 
 findstr /b /c:"MODEL_CONFIG_PATH=/srv/config/models.local.json" ".env" >nul 2>&1
 if errorlevel 1 (
-    echo  [info]  Your .env is not configured for the local stack.
-    echo          .env.local.example will be copied over it; the current .env
-    echo          is kept as .env.backup
+    echo  [info]  Configuring .env for the open-source stack.
+    echo          The current .env is kept as .env.backup
     echo.
-    choice /c YN /n /m "         Continue? [Y/N] "
-    if errorlevel 2 (
+    if not defined LOCAL_CONFIRMED choice /c YN /n /m "         Continue? [Y/N] "
+    if errorlevel 2 if not defined LOCAL_CONFIRMED (
         echo.
         echo  Cancelled. To do it by hand: copy .env.local.example to .env
         goto :end
@@ -424,8 +477,9 @@ goto :end
 :show_help
 echo  Usage:  run-mpg.bat [command]
 echo.
-echo    up        Build and start the full stack   (default)
-echo    local     Start with free open-source models (Ollama, no API keys)
+echo    (none)    Auto-detect and start          (default)
+echo    up        Start using API-key providers  (OpenAI / Anthropic / Gemini)
+echo    local     Start using free open-source models (Ollama, no API keys)
 echo    down      Stop the stack, keep the data
 echo    restart   Recreate the application containers
 echo    rebuild   Force a no-cache rebuild, then start
