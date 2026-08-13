@@ -117,6 +117,18 @@ async def get_current_principal(token: Optional[str] = Depends(oauth2_scheme)) -
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Malformed subject claim"
         ) from exc
+
+    # A signed token is not enough: it may have been logged out, or issued
+    # before the account's privileges changed.
+    from app.core.revocation import revocation_store
+
+    if await revocation_store.is_revoked(payload.jti, payload.sub, payload.iat):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return Principal(user_id=user_id, role=payload.role)
 
 

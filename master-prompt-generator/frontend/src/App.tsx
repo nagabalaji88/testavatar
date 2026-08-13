@@ -130,8 +130,9 @@ function Shell({ children }: { children: ReactNode }) {
               variant="ghost"
               aria-label="Sign out"
               onClick={() => {
-                api.logout();
-                window.location.href = '/login';
+                void api.logout().finally(() => {
+                  window.location.href = '/login';
+                });
               }}
             >
               <LogOut className="size-4" />

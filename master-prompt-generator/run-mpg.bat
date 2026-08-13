@@ -161,6 +161,15 @@ if errorlevel 1 (
 ) else (
     echo  [ok]    Generated a random JWT_SECRET_KEY.
 )
+
+REM The database password ships as mpg/mpg. Replace it too, so a per-install
+REM credential exists even if the ports are later exposed.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$b=[Security.Cryptography.RandomNumberGenerator]::GetBytes(18); $s=([Convert]::ToBase64String($b)) -replace '[+/=]','x'; (Get-Content '.env') -replace '^POSTGRES_PASSWORD=.*', ('POSTGRES_PASSWORD=' + $s) ^| Set-Content '.env'" >nul 2>&1
+if errorlevel 1 (
+    echo  [warn]  Could not auto-generate POSTGRES_PASSWORD - it is still mpg/mpg.
+) else (
+    echo  [ok]    Generated a random POSTGRES_PASSWORD.
+)
 exit /b 0
 
 

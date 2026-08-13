@@ -64,9 +64,12 @@ docker compose up --build
 | API docs | http://localhost:8000/docs |
 | Prometheus metrics | http://localhost:8000/metrics |
 
-Register the first account from the sign-in screen, then launch a run. New
-accounts default to the `engineer` role; promote to `admin` in the `users`
-table to manage the model registry.
+Register the first account from the sign-in screen — **the first account on a
+fresh instance becomes the admin**. Every later registration is created as an
+engineer; an admin promotes them via `PATCH /auth/users/{id}/role`.
+
+Infrastructure ports bind to `127.0.0.1` by default, so the dashboard is the
+only thing exposed. See [Security](#security) before deploying anywhere shared.
 
 ## Architecture
 
@@ -276,7 +279,7 @@ npm run dev
 ## Tests
 
 ```bash
-cd backend && python -m pytest tests      # 38 tests, consensus + judge logic
+cd backend && python -m pytest tests      # 78 tests: engine, registry, security
 cd frontend && npm run typecheck && npm run build
 ```
 
@@ -302,9 +305,31 @@ paths are exercised through their fallbacks.
 
 ## Security
 
-- Argon2 password hashing; JWT access + refresh tokens with typed claims.
-- RBAC (`viewer` < `engineer` < `admin`) enforced by dependency guards; runs are
-  scoped to their owner unless the caller is an admin.
+- **Server-assigned roles.** Registration takes no `role`; the first account on
+  a fresh instance becomes admin, everyone after is an engineer. Promotion is
+  admin-only via `PATCH /auth/users/{id}/role`, which also revokes the target's
+  existing sessions so a demoted admin cannot keep using an old token.
+- **Deployment guards.** With `ENVIRONMENT` set to staging or production the app
+  refuses to boot on the default `JWT_SECRET_KEY`, a secret under 32 characters,
+  wildcard CORS, or the default `mpg/mpg` database credentials.
+- **Token revocation.** Logout revokes the presented tokens by `jti`, and
+  `/auth/logout-all` invalidates every token issued to a user. Backed by Redis
+  with a TTL matched to the token lifetime. Fails closed in production,
+  open locally (`STRICT_TOKEN_REVOCATION`).
+- **SSRF guard.** A provider's `api_base` is admin-writable and fetched
+  server-side, so it is validated: http/https only, no embedded credentials,
+  instance-metadata addresses always blocked, private addresses permitted only
+  by name via `API_BASE_ALLOWLIST` (which is how local Ollama stays usable).
+- **Rate limits** on login (per caller and per account), registration, and run
+  creation — the last is a budget control, since every run spends provider money.
+- **Loopback by default.** Compose binds PostgreSQL, Redis, Qdrant, Ollama and
+  the API to `127.0.0.1`; only the frontend is exposed. Override with
+  `BIND_ADDRESS` only behind a firewall you control.
+- Argon2 password hashing; RBAC (`viewer` < `engineer` < `admin`) enforced by
+  dependency guards; runs are scoped to their owner unless the caller is admin.
 - Websockets authenticate via a query-parameter token (browsers cannot set
-  handshake headers) and close with 1008 on failure.
-- Set `JWT_SECRET_KEY` before any non-local deployment.
+  handshake headers) and close with 1008 on failure. Note the token may appear
+  in proxy access logs; terminate TLS and scrub query strings accordingly.
+
+Not yet addressed: no dependency vulnerability scanning in CI, no audit log of
+admin actions beyond structured logs, and no MFA.

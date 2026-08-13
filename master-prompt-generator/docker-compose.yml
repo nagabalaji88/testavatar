@@ -32,6 +32,10 @@ x-backend-env: &backend-env
   OTEL_ENABLED: ${OTEL_ENABLED:-false}
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
 
+# Infrastructure ports bind to 127.0.0.1 by default: published on 0.0.0.0 they
+# put PostgreSQL, Redis and Qdrant -- none of which authenticate meaningfully
+# here -- on any interface the host has. Only the frontend is exposed. Override
+# with BIND_ADDRESS=0.0.0.0 only behind a firewall you control.
 services:
   postgres:
     image: postgres:16-alpine
@@ -43,7 +47,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      - '${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432'
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-mpg} -d ${POSTGRES_DB:-mpg}']
       interval: 10s
@@ -57,7 +61,7 @@ services:
     volumes:
       - redis-data:/data
     ports:
-      - '${REDIS_PORT:-6379}:6379'
+      - '${BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379'
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
@@ -72,7 +76,7 @@ services:
     volumes:
       - qdrant-data:/qdrant/storage
     ports:
-      - '${QDRANT_PORT:-6333}:6333'
+      - '${BIND_ADDRESS:-127.0.0.1}:${QDRANT_PORT:-6333}:6333'
 
   # --- Open-source inference (profile: local) -----------------------------
   # Serves open-weight models from your own hardware. No API key, no per-token
@@ -91,7 +95,7 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     ports:
-      - '${OLLAMA_PORT:-11434}:11434'
+      - '${BIND_ADDRESS:-127.0.0.1}:${OLLAMA_PORT:-11434}:11434'
     healthcheck:
       test: ['CMD-SHELL', 'ollama list >/dev/null 2>&1 || exit 1']
       interval: 15s
@@ -130,7 +134,7 @@ services:
       # add models without rebuilding the image.
       - ./backend/config:/srv/config
     ports:
-      - '${BACKEND_PORT:-8000}:8000'
+      - '${BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-8000}:8000'
     depends_on:
       postgres:
         condition: service_healthy

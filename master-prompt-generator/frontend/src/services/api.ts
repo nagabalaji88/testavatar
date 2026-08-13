@@ -141,8 +141,29 @@ export const api = {
     });
   },
 
-  logout(): void {
-    tokenStore.clear();
+  /** Revoke the tokens server-side, then clear them locally.
+   *  Clearing alone left a stolen access token usable until it expired. */
+  async logout(): Promise<void> {
+    const refresh = tokenStore.refresh();
+    try {
+      await request<void>('/auth/logout', {
+        method: 'POST',
+        body: JSON.stringify({ refresh_token: refresh ?? '' }),
+      });
+    } catch {
+      // Network or already-expired token: local cleanup still must happen.
+    } finally {
+      tokenStore.clear();
+    }
+  },
+
+  /** Invalidate every session for the current user. */
+  async logoutEverywhere(): Promise<void> {
+    try {
+      await request<void>('/auth/logout-all', { method: 'POST' });
+    } finally {
+      tokenStore.clear();
+    }
   },
 
   me: (): Promise<CurrentUser> => request<CurrentUser>('/auth/me'),

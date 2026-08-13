@@ -207,6 +207,19 @@ class ProviderConfig(BaseModel):
     api_base: Optional[str] = None
     weight: float = Field(default=1.0, gt=0)
 
+    @field_validator("api_base")
+    @classmethod
+    def _safe_api_base(cls, value: Optional[str]) -> Optional[str]:
+        """Reject endpoints that would turn the registry into an SSRF tool."""
+        if not value:
+            return value
+        from app.core.net import UnsafeEndpointError, validate_api_base
+
+        try:
+            return validate_api_base(value)
+        except UnsafeEndpointError as exc:
+            raise ValueError(str(exc)) from exc
+
     def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
         return round(
             (input_tokens / 1000) * self.cost_per_1k_input
@@ -240,10 +253,21 @@ class ProviderToggle(BaseModel):
 
 
 class UserCreate(BaseModel):
+    """Public registration payload.
+
+    Deliberately has no `role` field: it was previously accepted from the
+    request body on an unauthenticated route, which let anyone create an admin
+    account. Roles are assigned by the server and changed only by an admin
+    through /auth/users/{id}/role.
+    """
+
     email: EmailStr
     password: str = Field(min_length=10, max_length=128)
     full_name: Optional[str] = None
-    role: Literal["viewer", "engineer", "admin"] = "engineer"
+
+
+class RoleUpdate(BaseModel):
+    role: Literal["viewer", "engineer", "admin"]
 
 
 class UserRead(BaseModel):

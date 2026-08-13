@@ -13,6 +13,7 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Request,
     Response,
     WebSocket,
     WebSocketDisconnect,
@@ -28,6 +29,7 @@ from app.core.events import EventType, event_bus
 from app.core.logging import get_logger
 from app.core.security import (
     Principal,
+    oauth2_scheme,
     Role,
     authenticate_websocket,
     create_access_token,
@@ -38,6 +40,8 @@ from app.core.security import (
     require_role,
     verify_password,
 )
+from app.core.ratelimit import client_identity, rate_limiter
+from app.core.revocation import revocation_store
 from app.core.telemetry import RUNS_STARTED
 from app.db.session import get_session
 from app.models.domain import ConsensusPrompt, ExecutionLog, PromptRun, RunStatus, User
@@ -49,6 +53,7 @@ from app.models.schemas import (
     ProviderConfig,
     ProviderToggle,
     RefreshRequest,
+    RoleUpdate,
     RunAccepted,
     RunCreate,
     RunDetail,
@@ -84,7 +89,28 @@ AdminUser = Annotated[Principal, Depends(require_role(Role.ADMIN))]
 @auth_router.post(
     "/register", response_model=UserRead, status_code=status.HTTP_201_CREATED
 )
-async def register(payload: UserCreate, session: SessionDep) -> User:
+async def register(
+    payload: UserCreate, request: Request, session: SessionDep
+) -> User:
+    """Create an account.
+
+    The role is assigned by the server, never taken from the request. The first
+    account on a fresh instance becomes the admin so the deployment is usable;
+    everyone after that is an engineer and must be promoted by an admin.
+    """
+    if not settings.allow_open_registration:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Registration is closed. Ask an administrator for an account.",
+        )
+
+    await rate_limiter.check(
+        "register",
+        client_identity(request),
+        settings.rate_limit_register_per_hour,
+        3600,
+    )
+
     existing = (
         await session.execute(select(User).where(User.email == payload.email.lower()))
     ).scalar_one_or_none()
@@ -93,23 +119,44 @@ async def register(payload: UserCreate, session: SessionDep) -> User:
             status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
         )
 
+    user_count = (
+        await session.execute(select(func.count()).select_from(User))
+    ).scalar_one()
+    role = Role.ADMIN if user_count == 0 else Role.ENGINEER
+
     user = User(
         email=payload.email.lower(),
         hashed_password=hash_password(payload.password),
         full_name=payload.full_name,
-        role=payload.role,
+        role=role.value,
     )
     session.add(user)
     await session.flush()
-    logger.info("user_registered", extra={"user_id": str(user.id)})
+    logger.info(
+        "user_registered",
+        extra={"user_id": str(user.id), "role": role.value, "bootstrap": user_count == 0},
+    )
     return user
 
 
 @auth_router.post("/login", response_model=TokenPair)
 async def login(
+    request: Request,
     session: SessionDep,
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> TokenPair:
+    # Throttle by caller and by account, so neither a spray across accounts nor
+    # a focused attack on one account gets unlimited attempts.
+    await rate_limiter.check(
+        "login", client_identity(request), settings.rate_limit_login_per_minute, 60
+    )
+    await rate_limiter.check(
+        "login-account",
+        form.username.strip().lower(),
+        settings.rate_limit_login_per_minute,
+        60,
+    )
+
     user = (
         await session.execute(
             select(User).where(User.email == form.username.strip().lower())
@@ -161,6 +208,76 @@ async def read_me(principal: CurrentUser, session: SessionDep) -> User:
     return user
 
 
+@auth_router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    principal: CurrentUser,
+    token: Annotated[Optional[str], Depends(oauth2_scheme)],
+    payload: Optional[RefreshRequest] = Body(default=None),
+) -> Response:
+    """Revoke the presented tokens.
+
+    A JWT is valid until it expires, so signing out has to be recorded
+    server-side; without this, a leaked token stays usable for its full hour
+    (or fourteen days, for a refresh token).
+    """
+    if token:
+        claims = decode_token(token)
+        await revocation_store.revoke_token(claims.jti, claims.exp)
+    if payload and payload.refresh_token:
+        try:
+            refresh_claims = decode_token(payload.refresh_token, expected_type="refresh")
+            await revocation_store.revoke_token(refresh_claims.jti, refresh_claims.exp)
+        except HTTPException:
+            pass  # already invalid; nothing left to revoke
+
+    logger.info("user_logged_out", extra={"user_id": str(principal.user_id)})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@auth_router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
+async def logout_everywhere(principal: CurrentUser) -> Response:
+    """Invalidate every token already issued to the caller."""
+    await revocation_store.revoke_user(str(principal.user_id))
+    logger.info("user_sessions_revoked", extra={"user_id": str(principal.user_id)})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@auth_router.get("/users", response_model=list[UserRead])
+async def list_users(session: SessionDep, principal: AdminUser) -> list[User]:
+    result = await session.execute(select(User).order_by(User.created_at.asc()))
+    return list(result.scalars().all())
+
+
+@auth_router.patch("/users/{user_id}/role", response_model=UserRead)
+async def set_user_role(
+    user_id: uuid.UUID,
+    payload: RoleUpdate,
+    session: SessionDep,
+    principal: AdminUser,
+) -> User:
+    """Change a user's role. Admin only -- the sole way to grant admin."""
+    user = await session.get(User, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    if user.id == principal.user_id and payload.role != Role.ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Refusing to remove your own admin role; promote another admin first",
+        )
+
+    user.role = payload.role
+    session.add(user)
+    # Tokens carry the role, so existing sessions would keep the old privileges.
+    await revocation_store.revoke_user(str(user.id))
+    logger.info(
+        "user_role_changed",
+        extra={"user_id": str(user.id), "role": payload.role, "by": str(principal.user_id)},
+    )
+    return user
+
+
 # ---------------------------------------------------------------------------
 # Runs
 # ---------------------------------------------------------------------------
@@ -197,6 +314,12 @@ async def create_run(
     payload: RunCreate, session: SessionDep, principal: EngineerUser
 ) -> RunAccepted:
     """Persist a run and dispatch the pipeline to a Celery worker."""
+    # Every run spends real money at a provider, so this is a budget control as
+    # much as an abuse control.
+    await rate_limiter.check(
+        "runs", str(principal.user_id), settings.rate_limit_runs_per_hour, 3600
+    )
+
     try:
         providers = model_registry.resolve(payload.model_ids)
     except UnknownProviderError as exc:

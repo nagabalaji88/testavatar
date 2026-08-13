@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, Optional
+from typing import ClassVar, Literal, Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -51,11 +51,41 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
 
     # --- Security ---------------------------------------------------------
-    jwt_secret_key: str = Field(default="change-me-in-production", min_length=8)
+    DEFAULT_JWT_SECRET: ClassVar[str] = "change-me-in-production"
+
+    jwt_secret_key: str = Field(default=DEFAULT_JWT_SECRET, min_length=8)
     jwt_algorithm: str = "HS256"
     access_token_ttl_minutes: int = 60
     refresh_token_ttl_minutes: int = 60 * 24 * 14
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+
+    # Open registration is convenient locally and a liability in production.
+    # The very first account is always promoted to admin so the instance is
+    # usable; every later account is created as an engineer.
+    allow_open_registration: bool = True
+
+    # Reject a revoked token when the revocation store is unreachable. Defaults
+    # on in production (correctness over availability) and off locally.
+    strict_token_revocation: Optional[bool] = None
+
+    # --- Rate limits (per identity, sliding fixed window) ------------------
+    rate_limit_enabled: bool = True
+    rate_limit_login_per_minute: int = 10
+    rate_limit_register_per_hour: int = 5
+    rate_limit_runs_per_hour: int = 30
+
+    # --- Outbound endpoint policy ----------------------------------------
+    # A provider's api_base is attacker-reachable via the admin model registry,
+    # so pointing it at a private address is an SSRF primitive. Local inference
+    # legitimately needs private hosts, so they are allowed only by name.
+    api_base_allowlist: list[str] = [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "ollama",
+        "vllm",
+        "host.docker.internal",
+    ]
 
     # --- Provider credentials --------------------------------------------
     openai_api_key: Optional[str] = None
@@ -94,12 +124,52 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     metrics_path: str = "/metrics"
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "api_base_allowlist", mode="before")
     @classmethod
-    def _split_origins(cls, value: object) -> object:
+    def _split_csv(cls, value: object) -> object:
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    @model_validator(mode="after")
+    def _enforce_deployment_safety(self) -> "Settings":
+        """Refuse to boot a non-local deployment with give-away defaults.
+
+        Every one of these is exploitable the moment the service is reachable,
+        and each has been shipped by someone who assumed the default was a
+        placeholder rather than a live value.
+        """
+        if self.environment == "local":
+            if self.strict_token_revocation is None:
+                self.strict_token_revocation = False
+            return self
+
+        problems: list[str] = []
+        if self.jwt_secret_key == self.DEFAULT_JWT_SECRET:
+            problems.append(
+                "JWT_SECRET_KEY is still the shipped default, so anyone can "
+                "forge an admin token. Generate one with: "
+                'python -c "import secrets; print(secrets.token_urlsafe(48))"'
+            )
+        elif len(self.jwt_secret_key) < 32:
+            problems.append("JWT_SECRET_KEY must be at least 32 characters.")
+
+        if "*" in self.cors_origins:
+            problems.append(
+                "CORS_ORIGINS may not be '*' while credentials are allowed."
+            )
+        if ":mpg@" in self.database_url or "://mpg:mpg" in self.database_url:
+            problems.append("DATABASE_URL still uses the default mpg/mpg credentials.")
+
+        if problems:
+            raise ValueError(
+                f"Refusing to start in environment={self.environment}:\n  - "
+                + "\n  - ".join(problems)
+            )
+
+        if self.strict_token_revocation is None:
+            self.strict_token_revocation = True
+        return self
 
     @property
     def is_production(self) -> bool:
