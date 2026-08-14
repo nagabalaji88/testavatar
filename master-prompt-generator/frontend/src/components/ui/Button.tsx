@@ -41,9 +41,26 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     { className, variant, size, asChild = false, loading = false, children, disabled, ...props },
     ref,
   ) => {
-    const Comp = asChild ? Slot : 'button';
+    // Radix's Slot requires exactly one element child: it clones its props
+    // onto that child rather than rendering its own DOM node. Injecting a
+    // loading-spinner sibling here works for a real <button>, but a second
+    // child (even one that evaluates to null) makes Slot's child count != 1
+    // and it throws. asChild callers hand rendering control to the wrapped
+    // element entirely, so they get children only, with no spinner slot.
+    if (asChild) {
+      return (
+        <Slot
+          ref={ref}
+          className={cn(buttonVariants({ variant, size }), className)}
+          {...props}
+        >
+          {children}
+        </Slot>
+      );
+    }
+
     return (
-      <Comp
+      <button
         ref={ref}
         className={cn(buttonVariants({ variant, size }), className)}
         disabled={disabled || loading}
@@ -51,7 +68,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       >
         {loading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
         {children}
-      </Comp>
+      </button>
     );
   },
 );

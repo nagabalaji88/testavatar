@@ -593,14 +593,17 @@ def build_graph(deps: Optional[PipelineDependencies] = None):
     graph.add_node("analyze", analyze)
     graph.add_node("generate", generate)
     graph.add_node("evaluate", evaluate)
-    graph.add_node("consensus", consensus)
+    # Named "synthesize", not "consensus": LangGraph forbids a node name that
+    # collides with a PipelineState key, and "consensus" is already the state
+    # field the node writes into.
+    graph.add_node("synthesize", consensus)
     graph.add_node("finalize", finalize)
 
     graph.add_edge(START, "analyze")
     graph.add_edge("analyze", "generate")
     graph.add_edge("generate", "evaluate")
-    graph.add_edge("evaluate", "consensus")
-    graph.add_edge("consensus", "finalize")
+    graph.add_edge("evaluate", "synthesize")
+    graph.add_edge("synthesize", "finalize")
     graph.add_edge("finalize", END)
 
     return graph.compile()
