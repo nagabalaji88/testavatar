@@ -5,7 +5,21 @@
       "Bash(python3 -c ' *)",
       "Read(//c/Users/Nagabalaji/**)",
       "Read(//d//**)",
-      "PowerShell(ollama list 2>&1 | Select-Object -First 12; \"---\"; try { $r = Invoke-WebRequest -Uri \"http://127.0.0.1:11434/api/tags\" -TimeoutSec 5 -UseBasicParsing; \"ollama server: RUNNING\" } catch { \"ollama server: not responding \\($\\($_.Exception.Message\\)\\)\" })"
+      "PowerShell(ollama list 2>&1 | Select-Object -First 12; \"---\"; try { $r = Invoke-WebRequest -Uri \"http://127.0.0.1:11434/api/tags\" -TimeoutSec 5 -UseBasicParsing; \"ollama server: RUNNING\" } catch { \"ollama server: not responding \\($\\($_.Exception.Message\\)\\)\" })",
+      "PowerShell(docker info --format '{{.ServerVersion}}' 2>&1)",
+      "PowerShell(Set-Location \"D:\\\\AI_Gen\\\\Finals\\\\testavatar\\\\master-prompt-generator\"; docker compose images backend 2>&1 | Select-Object -First 5; Write-Output \"---\"; $img = docker inspect master-prompt-generator-backend-1 --format \"{{.Config.Image}}\" 2>&1; Write-Output \"image: $img\"; docker run --rm $img python -c \"import pydantic_settings; print\\('pydantic_settings', pydantic_settings.__version__\\); from pydantic_settings import NoDecode; print\\('NoDecode: OK'\\)\" 2>&1)",
+      "PowerShell(Set-Location \"D:\\\\AI_Gen\\\\Finals\\\\testavatar\\\\master-prompt-generator\"; Write-Output \"=== backend health endpoint ===\"; try { Invoke-RestMethod -Uri \"http://127.0.0.1:8000/health\" -TimeoutSec 5 } catch { \"FAILED: $\\($_.Exception.Message\\)\" }; Write-Output \"`n=== frontend container healthcheck ===\"; docker inspect master-prompt-generator-frontend-1 --format \"{{json .State.Health}}\" | ConvertFrom-Json | Select-Object Status -ExpandProperty Log | Select-Object -Last 3)",
+      "PowerShell(Set-Location \"D:\\\\AI_Gen\\\\Finals\\\\testavatar\\\\master-prompt-generator\"; docker restart master-prompt-generator-frontend-1 | Out-Null; Start-Sleep -Seconds 20; docker ps --format \"table {{.Names}}\\\\t{{.Status}}\\\\t{{.Ports}}\" --filter \"name=master-prompt-generator\"; Write-Output \"`n=== reachable from host? ===\"; try { $r = Invoke-WebRequest -Uri \"http://localhost:8080/\" -TimeoutSec 5 -UseBasicParsing; \"HTTP $\\($r.StatusCode\\)\" } catch { \"FAILED: $\\($_.Exception.Message\\)\" })",
+      "PowerShell(Set-Location \"D:\\\\AI_Gen\\\\Finals\\\\testavatar\\\\master-prompt-generator\"; Get-Content frontend\\\\Dockerfile | Select-String -Pattern \"HEALTHCHECK\" -Context 0,1; Write-Output \"`n=== exec the healthcheck command inside the container ===\"; docker exec master-prompt-generator-frontend-1 wget -qO- http://localhost/ 2>&1 | Select-Object -First 5; Write-Output \"exit code: $LASTEXITCODE\")",
+      "PowerShell(Set-Location \"D:\\\\AI_Gen\\\\Finals\\\\testavatar\\\\master-prompt-generator\"; Write-Output \"=== listen directive ===\"; Select-String -Path frontend\\\\nginx.conf -Pattern \"listen\"; Write-Output \"`n=== try 127.0.0.1 explicitly ===\"; docker exec master-prompt-generator-frontend-1 wget -qO- http://127.0.0.1/ 2>&1 | Select-Object -First 3; Write-Output \"exit: $LASTEXITCODE\"; Write-Output \"`n=== /etc/hosts inside container ===\"; docker exec master-prompt-generator-frontend-1 cat /etc/hosts)",
+      "PowerShell(Set-Location \"D:\\\\AI_Gen\\\\Finals\\\\testavatar\\\\master-prompt-generator\"; Write-Output \"=== frontend serves the SPA ===\"; \\(Invoke-WebRequest -Uri \"http://localhost:8080/\" -UseBasicParsing\\).StatusCode; Write-Output \"`n=== API reachable through the frontend proxy ===\"; \\(Invoke-RestMethod -Uri \"http://localhost:8080/api/v1/health\"\\).status; Write-Output \"`n=== git status ===\"; git status --short)",
+      "Bash(docker exec *)",
+      "Bash(docker exec master-prompt-generator-backend-1 python3 -c ' *)",
+      "Bash(docker compose *)",
+      "Bash(cat \"/c/Users/NAGABA~1/AppData/Local/Temp/claude/d--AI-Gen-Finals-testavatar-master-prompt-generator/0d6cc162-6746-4301-9284-d7501cd4c7c8/tasks/b41hfpvx4.output\" 2>&1)",
+      "Read(//c/Users/NAGABA~1/AppData/Local/Temp/claude/d--AI-Gen-Finals-testavatar-master-prompt-generator/0d6cc162-6746-4301-9284-d7501cd4c7c8/tasks/**)",
+      "Bash(python3 -m py_compile app/services/llm_service.py)",
+      "Bash(cat \"/c/Users/NAGABA~1/AppData/Local/Temp/claude/d--AI-Gen-Finals-testavatar-master-prompt-generator/0d6cc162-6746-4301-9284-d7501cd4c7c8/tasks/bn6c4vfxy.output\" 2>&1)"
     ]
   }
 }
