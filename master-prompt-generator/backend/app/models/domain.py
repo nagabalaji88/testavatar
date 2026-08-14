@@ -16,7 +16,7 @@ from enum import Enum
 from typing import Any, Optional
 
 
-from sqlalchemy import Column, DateTime, Index, Text
+from sqlalchemy import JSON, Column, DateTime, Index, Text
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlmodel import Field, Relationship, SQLModel
 

@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import ClassVar, Literal, Optional
+from typing import Annotated, ClassVar, Literal, Optional
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -65,7 +65,15 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_ttl_minutes: int = 60
     refresh_token_ttl_minutes: int = 60 * 24 * 14
-    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    # NoDecode: pydantic-settings otherwise attempts json.loads() on the raw env
+    # string for any list-typed field before a validator ever sees it, and
+    # "http://a,http://b" is not valid JSON -- the app would fail to boot the
+    # moment CORS_ORIGINS held more than one plain comma-separated origin.
+    # NoDecode hands the raw string through so _split_csv below can parse it.
+    cors_origins: Annotated[list[str], NoDecode] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ]
 
     # Open registration is convenient locally and a liability in production.
     # The very first account is always promoted to admin so the instance is
@@ -86,7 +94,7 @@ class Settings(BaseSettings):
     # A provider's api_base is attacker-reachable via the admin model registry,
     # so pointing it at a private address is an SSRF primitive. Local inference
     # legitimately needs private hosts, so they are allowed only by name.
-    api_base_allowlist: list[str] = [
+    api_base_allowlist: Annotated[list[str], NoDecode] = [
         "localhost",
         "127.0.0.1",
         "::1",
