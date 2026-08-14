@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/user/testavatar/master-prompt-generator/**)",
+      "Bash(python3 -c ' *)",
+      "Read(//c/Users/Nagabalaji/**)",
+      "Read(//d//**)",
+      "PowerShell(ollama list 2>&1 | Select-Object -First 12; \"---\"; try { $r = Invoke-WebRequest -Uri \"http://127.0.0.1:11434/api/tags\" -TimeoutSec 5 -UseBasicParsing; \"ollama server: RUNNING\" } catch { \"ollama server: not responding \\($\\($_.Exception.Message\\)\\)\" })"
+    ]
+  }
+}

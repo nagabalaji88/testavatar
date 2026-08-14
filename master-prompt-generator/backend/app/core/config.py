@@ -31,15 +31,23 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # --- Persistence ------------------------------------------------------
-    database_url: str = "postgresql+asyncpg://mpg:mpg@postgres:5432/mpg"
+    # Defaults are the no-service path: a single SQLite file, no Redis, no
+    # Celery. Point these at PostgreSQL and Redis to scale out; nothing else
+    # in the app changes.
+    database_url: str = "sqlite+aiosqlite:///./data/mpg.db"
+    sqlite_directory: str = "./data"
     database_pool_size: int = 10
     database_max_overflow: int = 20
 
-    redis_url: str = "redis://redis:6379/0"
-    celery_broker_url: str = "redis://redis:6379/1"
-    celery_result_backend: str = "redis://redis:6379/2"
+    # Empty means "run in-process": the event bus, rate limiter and revocation
+    # store all fall back to in-memory implementations.
+    redis_url: str = ""
+    celery_broker_url: str = ""
+    celery_result_backend: str = ""
 
-    qdrant_url: str = "http://qdrant:6333"
+    # Empty disables the vector index entirely; semantic search then returns
+    # nothing and the pipeline is unaffected.
+    qdrant_url: str = ""
     qdrant_api_key: Optional[str] = None
     qdrant_collection: str = "mpg_prompts"
 
@@ -174,6 +182,21 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def use_redis(self) -> bool:
+        """False when running single-process with in-memory infrastructure."""
+        return bool(self.redis_url.strip())
+
+    @property
+    def use_celery(self) -> bool:
+        """False when the pipeline should execute inline in the API process."""
+        return bool(self.celery_broker_url.strip())
+
+    @property
+    def frontend_dist(self) -> Path:
+        """Built SPA served directly by FastAPI, so no web server is required."""
+        return BACKEND_ROOT.parent / "frontend" / "dist"
 
 
 @lru_cache(maxsize=1)

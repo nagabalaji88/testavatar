@@ -26,8 +26,16 @@ KEY = "mpg:ratelimit:{scope}:{identity}:{window}"
 
 class RateLimiter:
     def __init__(self, redis_url: Optional[str] = None) -> None:
-        self._redis_url = redis_url or settings.redis_url
+        self._redis_url = redis_url if redis_url is not None else settings.redis_url
         self._client: Optional[aioredis.Redis] = None
+        # Single-process counters, used when no Redis is configured. Correct for
+        # one API process; a multi-process deployment must supply Redis or each
+        # worker will enforce the limit independently.
+        self._memory_counts: dict[str, int] = {}
+
+    @property
+    def in_memory(self) -> bool:
+        return not bool(self._redis_url.strip())
 
     async def client(self) -> aioredis.Redis:
         if self._client is None:
@@ -43,6 +51,18 @@ class RateLimiter:
         window = int(time.time()) // window_seconds
         key = KEY.format(scope=scope, identity=identity, window=window)
 
+        if self.in_memory:
+            # Drop counters belonging to windows that have already rolled over.
+            suffix = f":{window}"
+            self._memory_counts = {
+                k: v for k, v in self._memory_counts.items() if k.endswith(suffix)
+            }
+            count = self._memory_counts.get(key, 0) + 1
+            self._memory_counts[key] = count
+            if count > limit:
+                self._reject(scope, identity, count, window_seconds)
+            return
+
         try:
             client = await self.client()
             pipe = client.pipeline()
@@ -54,16 +74,19 @@ class RateLimiter:
             return
 
         if int(count) > limit:
-            retry_after = window_seconds - (int(time.time()) % window_seconds)
-            logger.warning(
-                "rate_limit_exceeded",
-                extra={"scope": scope, "identity": identity, "count": int(count)},
-            )
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Rate limit exceeded for {scope}. Retry in {retry_after}s.",
-                headers={"Retry-After": str(retry_after)},
-            )
+            self._reject(scope, identity, int(count), window_seconds)
+
+    def _reject(self, scope: str, identity: str, count: int, window_seconds: int) -> None:
+        retry_after = window_seconds - (int(time.time()) % window_seconds)
+        logger.warning(
+            "rate_limit_exceeded",
+            extra={"scope": scope, "identity": identity, "count": count},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded for {scope}. Retry in {retry_after}s.",
+            headers={"Retry-After": str(retry_after)},
+        )
 
     async def close(self) -> None:
         if self._client is not None:

@@ -7,9 +7,14 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
-from sqlalchemy import Column, Index, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, Column, Index, Text
+from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlmodel import Field, Relationship, SQLModel
+
+# Portable JSON column: real JSONB (indexable, queryable) on PostgreSQL, plain
+# JSON everywhere else. This is what lets the app run on SQLite with no server,
+# while a Postgres deployment keeps the better type.
+JSONB = JSON().with_variant(PG_JSONB, "postgresql")
 
 
 def _utcnow() -> datetime:
