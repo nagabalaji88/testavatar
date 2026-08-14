@@ -1,0 +1,58 @@
+{
+  "_comment": "Registry for a native Ollama install (host.docker.internal) instead of the containerized `ollama` Compose service. Tags below match one machine's `ollama list` output -- swap the model_key values for whatever you actually have pulled; the ids only need to match ANALYZER_MODEL_ID / JUDGE_MODEL_ID / CONSENSUS_MODEL_ID in .env.",
+  "version": "1.0",
+  "providers": [
+    {
+      "id": "ollama-qwen3",
+      "name": "Qwen3 8B",
+      "provider": "Ollama",
+      "model_key": "ollama_chat/qwen3:8b",
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": true,
+      "temperature": 0.4,
+      "supports_json_mode": true,
+      "weight": 1.0
+    },
+    {
+      "id": "ollama-qwen25-coder",
+      "name": "Qwen2.5 Coder 7B",
+      "provider": "Ollama",
+      "model_key": "ollama_chat/qwen2.5-coder:7b",
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": true,
+      "temperature": 0.4,
+      "supports_json_mode": true,
+      "weight": 1.0
+    },
+    {
+      "id": "ollama-mistral",
+      "name": "Mistral 7B",
+      "provider": "Ollama",
+      "model_key": "ollama_chat/mistral:latest",
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": true,
+      "temperature": 0.4,
+      "supports_json_mode": true,
+      "weight": 1.0
+    },
+    {
+      "id": "ollama-gemma4",
+      "name": "Gemma 4 26B",
+      "provider": "Ollama",
+      "model_key": "ollama_chat/gemma4:26b",
+      "max_tokens": 8192,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": false,
+      "temperature": 0.4,
+      "supports_json_mode": true,
+      "weight": 1.0
+    }
+  ]
+}
