@@ -32,21 +32,15 @@ resolved rather than concatenated.
 **Windows** — double-click `run-mpg.bat`, or from a console:
 
 ```bat
-run-mpg.bat            :: auto-detect and start
-run-mpg.bat local      :: force the free open-source stack (Ollama)
-run-mpg.bat up         :: force the API-key stack
+run-mpg.bat            :: build and start
 run-mpg.bat logs       :: tail the pipeline logs
 run-mpg.bat down       :: stop, keeping the data
 run-mpg.bat help       :: all commands
 ```
 
-With no argument it picks the stack from what is actually configured:
-
-| `.env` state | What starts |
-| --- | --- |
-| Points at `models.local.json` | Free open-source stack |
-| Has an OpenAI / Anthropic / Gemini key | API-key stack |
-| Neither | Asks, defaulting to free and open source |
+Local open-source model execution (Ollama) is disabled; the stack always runs
+on API-key providers (OpenAI / Anthropic / Gemini). Add at least one key to
+`.env` — `run-mpg.bat local` reports how, rather than starting Ollama.
 
 It also checks Docker, generates a random `JWT_SECRET_KEY` on first run, waits
 for the API to report healthy, then opens the dashboard.
@@ -188,19 +182,19 @@ latency get one axis each — never a dual-axis chart.
 > scripts pass `--config Vite.config.ts` explicitly (Vite only auto-detects the
 > lowercase name).
 
-## Running on free, open-source models
+## Running on free, open-source models (disabled by default)
 
-The whole pipeline can run on open-weight models served from your own hardware,
-with **no API keys and no per-token cost**:
+`run-mpg.bat local` is disabled — it now just explains how to configure an
+API-key provider instead of starting Ollama, and the default `run-mpg.bat` /
+`docker compose up` never touches it. The underlying open-weight path still
+exists in the codebase and can be started directly with Compose if you want
+it:
 
 ```bash
 cp .env.local.example .env
 docker compose --profile local up --build
 docker compose --profile local run --rm ollama-pull   # first run only
 ```
-
-or on Windows, `run-mpg.bat local` — which does all three steps, including
-copying the env file and generating a secret.
 
 This starts an [Ollama](https://ollama.com) service and points the backend at
 `backend/config/models.local.json`, which fans out across **Qwen2.5 7B**,
