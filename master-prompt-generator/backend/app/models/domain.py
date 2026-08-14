@@ -1,15 +1,30 @@
-"""Relational domain model (SQLModel tables)."""
+"""Relational domain model (SQLModel tables).
 
-from __future__ import annotations
+Deliberately does NOT use `from __future__ import annotations`. SQLModel's
+relationship resolution walks real annotation objects at mapper-configuration
+time; with postponed evaluation active, every annotation becomes a plain
+string, and a collection annotation that is itself already a quoted forward
+reference (`list["PromptRun"]`) gets stringified a second time into the
+literal, unresolvable name `"list['PromptRun']"`. Classes referenced before
+their own definition still need an explicit forward-reference string below;
+everything else is a real, immediately-evaluated type.
+"""
 
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
-from sqlalchemy import Column, Index, Text
+from sqlalchemy import Column, DateTime, Index, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
+
+# Every timestamp in the app is produced by _utcnow(), which is timezone-aware.
+# SQLModel's plain `datetime` annotation maps to Postgres TIMESTAMP WITHOUT TIME
+# ZONE unless told otherwise, and asyncpg refuses to insert an aware datetime
+# into a naive column. Every datetime column below is explicit about this.
+def _tz_column(*, index: bool = False, nullable: bool = True) -> Column:
+    return Column(DateTime(timezone=True), index=index, nullable=nullable)
 
 
 def _utcnow() -> datetime:
@@ -48,7 +63,7 @@ class User(SQLModel, table=True):
     full_name: Optional[str] = Field(default=None, max_length=200)
     role: str = Field(default="engineer", max_length=32)
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
 
     runs: list["PromptRun"] = Relationship(back_populates="owner")
 
@@ -79,16 +94,18 @@ class PromptRun(SQLModel, table=True):
     duration_ms: Optional[int] = Field(default=None)
 
     trace_id: Optional[str] = Field(default=None, max_length=64)
-    created_at: datetime = Field(default_factory=_utcnow, index=True)
-    started_at: Optional[datetime] = Field(default=None)
-    completed_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(
+        default_factory=_utcnow, sa_column=_tz_column(index=True)
+    )
+    started_at: Optional[datetime] = Field(default=None, sa_column=_tz_column())
+    completed_at: Optional[datetime] = Field(default=None, sa_column=_tz_column())
 
     owner: Optional[User] = Relationship(back_populates="runs")
     candidates: list["PromptCandidate"] = Relationship(
         back_populates="run",
         sa_relationship_kwargs={"cascade": "all, delete-orphan", "lazy": "selectin"},
     )
-    consensus: "Optional[ConsensusPrompt]" = Relationship(
+    consensus: Optional["ConsensusPrompt"] = Relationship(
         back_populates="run",
         sa_relationship_kwargs={"cascade": "all, delete-orphan", "uselist": False},
     )
@@ -120,7 +137,7 @@ class PromptCandidate(SQLModel, table=True):
     metrics: Optional[dict[str, float]] = Field(default=None, sa_column=Column(JSONB))
     evaluation: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
 
-    created_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
 
     run: PromptRun = Relationship(back_populates="candidates")
 
@@ -154,7 +171,7 @@ class ConsensusPrompt(SQLModel, table=True):
     tokens_saved: int = Field(default=0)
     improvement_over_best: Optional[float] = Field(default=None)
     vector_point_id: Optional[str] = Field(default=None, max_length=64)
-    created_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
 
     run: PromptRun = Relationship(back_populates="consensus")
 
@@ -178,4 +195,6 @@ class ExecutionLog(SQLModel, table=True):
     attempts: int = Field(default=1)
     span_id: Optional[str] = Field(default=None, max_length=64)
     detail: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
-    created_at: datetime = Field(default_factory=_utcnow, index=True)
+    created_at: datetime = Field(
+        default_factory=_utcnow, sa_column=_tz_column(index=True)
+    )
