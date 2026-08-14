@@ -34,6 +34,7 @@ from litellm.exceptions import (
     AuthenticationError,
     BadRequestError,
     ContextWindowExceededError,
+    InternalServerError,
     RateLimitError,
     ServiceUnavailableError,
     Timeout,
@@ -55,6 +56,15 @@ RETRYABLE: tuple[type[Exception], ...] = (
     ServiceUnavailableError,
     APIConnectionError,
     Timeout,
+    # litellm.exceptions.InternalServerError subclasses openai.APIError, not
+    # litellm's own APIError below -- a completely separate hierarchy, so it
+    # was previously caught by nothing here and crashed straight through any
+    # bare call. A provider's transient 500 is as retryable as a 503; this is
+    # what a fan-out-isolated candidate failure turned into an unhandled crash
+    # of the whole run when it happened during analysis, judging, or the
+    # consensus polish pass, none of which go through fan_out()'s per-provider
+    # try/except.
+    InternalServerError,
 )
 FATAL: tuple[type[Exception], ...] = (
     AuthenticationError,

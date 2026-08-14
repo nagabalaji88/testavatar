@@ -1,46 +1,6 @@
 {
-  "_comment": "Mixed registry: local models via a native Ollama install (host.docker.internal, no containerized `ollama` service needed) alongside the hosted OpenAI and Gemini providers, so a consensus run fans out across all of them. Ollama model_key values match one machine's `ollama list` output -- swap for whatever you actually have pulled. OpenAI/Gemini need OPENAI_API_KEY / GEMINI_API_KEY set in .env. Ids only need to match ANALYZER_MODEL_ID / JUDGE_MODEL_ID / CONSENSUS_MODEL_ID in .env. gemini-flash-latest is Google's rolling alias for their current default model -- pinning a dated snapshot (e.g. gemini-1.5-pro, gemini-2.5-pro) risks it being retired later, which is exactly what happened when this file was first written. Gemini cost_per_1k values are a rough estimate, not pulled from a live pricing endpoint -- check Google's current rate card if accurate cost tracking matters.",
   "version": "1.0",
   "providers": [
-    {
-      "id": "ollama-qwen3",
-      "name": "Qwen3 8B",
-      "provider": "Ollama",
-      "model_key": "ollama_chat/qwen3:8b",
-      "max_tokens": 4096,
-      "cost_per_1k_input": 0.0,
-      "cost_per_1k_output": 0.0,
-      "enabled": true,
-      "temperature": 0.4,
-      "supports_json_mode": true,
-      "weight": 1.0
-    },
-    {
-      "id": "ollama-qwen25-coder",
-      "name": "Qwen2.5 Coder 7B",
-      "provider": "Ollama",
-      "model_key": "ollama_chat/qwen2.5-coder:7b",
-      "max_tokens": 4096,
-      "cost_per_1k_input": 0.0,
-      "cost_per_1k_output": 0.0,
-      "enabled": true,
-      "temperature": 0.4,
-      "supports_json_mode": true,
-      "weight": 1.0
-    },
-    {
-      "id": "ollama-mistral",
-      "name": "Mistral 7B",
-      "provider": "Ollama",
-      "model_key": "ollama_chat/mistral:latest",
-      "max_tokens": 4096,
-      "cost_per_1k_input": 0.0,
-      "cost_per_1k_output": 0.0,
-      "enabled": true,
-      "temperature": 0.4,
-      "supports_json_mode": true,
-      "weight": 1.0
-    },
     {
       "id": "ollama-gemma4",
       "name": "Gemma 4 26B",
@@ -52,6 +12,7 @@
       "enabled": false,
       "temperature": 0.4,
       "supports_json_mode": true,
+      "api_base": null,
       "weight": 1.0
     },
     {
@@ -65,6 +26,7 @@
       "enabled": true,
       "temperature": 0.4,
       "supports_json_mode": true,
+      "api_base": null,
       "weight": 1.0
     },
     {
@@ -78,6 +40,49 @@
       "enabled": true,
       "temperature": 0.4,
       "supports_json_mode": true,
+      "api_base": null,
+      "weight": 1.0
+    },
+    {
+      "id": "ollama-qwen3",
+      "name": "Qwen3 8B",
+      "provider": "Ollama",
+      "model_key": "ollama_chat/qwen3:8b",
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": false,
+      "temperature": 0.4,
+      "supports_json_mode": true,
+      "api_base": null,
+      "weight": 1.0
+    },
+    {
+      "id": "ollama-qwen25-coder",
+      "name": "Qwen2.5 Coder 7B",
+      "provider": "Ollama",
+      "model_key": "ollama_chat/qwen2.5-coder:7b",
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": false,
+      "temperature": 0.4,
+      "supports_json_mode": true,
+      "api_base": null,
+      "weight": 1.0
+    },
+    {
+      "id": "ollama-mistral",
+      "name": "Mistral 7B",
+      "provider": "Ollama",
+      "model_key": "ollama_chat/mistral:latest",
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": false,
+      "temperature": 0.4,
+      "supports_json_mode": true,
+      "api_base": null,
       "weight": 1.0
     }
   ]
