@@ -129,6 +129,17 @@ class Settings(BaseSettings):
     max_parallel_generations: int = 8
     llm_max_retries: int = 3
     llm_retry_base_delay: float = 1.5
+
+    # Output ceilings for the phases that return a small structured document.
+    # Without these every call inherits the provider's full max_tokens (4096+),
+    # which on a self-hosted model is a licence to decode thousands of tokens
+    # one at a time when the schema only needs a few hundred. These are
+    # ceilings, not targets: a well-behaved model still stops at its stop
+    # token, so this bounds the worst case rather than shortening the typical
+    # one. Sized with headroom -- a truncated reply fails to parse and costs a
+    # repair round-trip, which is more expensive than the tokens saved.
+    analysis_max_tokens: int = 1536
+    judge_max_tokens: int = 1536
     judge_model_id: str = "anthropic-claude-sonnet"
     consensus_model_id: str = "anthropic-claude-sonnet"
     analyzer_model_id: str = "openai-gpt4o"

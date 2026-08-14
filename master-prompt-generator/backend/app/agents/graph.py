@@ -10,6 +10,7 @@ the terminal `fail` node which records the error and closes the run.
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from datetime import datetime, timezone
@@ -21,7 +22,7 @@ from typing import Annotated, Any, Optional
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.agents.analyzer import RequirementAnalyzer, requirement_analyzer
 from app.agents.consensus import CandidateInput, ConsensusEngine, consensus_engine
@@ -132,16 +133,26 @@ async def _log_execution(
 
 
 async def _accumulate_usage(run_id: str, result: Optional[LLMResult]) -> None:
+    """Add one call's usage to the run totals atomically.
+
+    Read-modify-write in Python loses updates here: generation fans out and
+    evaluation now judges concurrently, so several callers hold the same row
+    at once and the last commit wins. Incrementing in SQL makes each addition
+    a single atomic statement, so no usage or cost is silently dropped.
+    """
     if result is None:
         return
     async with session_scope() as session:
-        run = await session.get(PromptRun, uuid.UUID(run_id))
-        if run is None:
-            return
-        run.total_input_tokens += result.input_tokens
-        run.total_output_tokens += result.output_tokens
-        run.total_cost_usd = round(run.total_cost_usd + result.cost_usd, 6)
-        session.add(run)
+        await session.execute(
+            update(PromptRun)
+            .where(PromptRun.id == uuid.UUID(run_id))
+            .values(
+                total_input_tokens=PromptRun.total_input_tokens + result.input_tokens,
+                total_output_tokens=PromptRun.total_output_tokens
+                + result.output_tokens,
+                total_cost_usd=PromptRun.total_cost_usd + result.cost_usd,
+            )
+        )
 
 
 def _resolve_providers(provider_ids: list[str]) -> list[ProviderConfig]:
@@ -365,8 +376,13 @@ def build_nodes(deps: PipelineDependencies):
             await event_bus.emit(run_id, EventType.STAGE_STARTED, stage="evaluation")
             await _set_status(run_id, RunStatus.EVALUATING)
 
-            verdicts: list[dict[str, Any]] = []
-            for candidate in candidates:
+            # Judged concurrently, not in a loop. Each candidate's verdict is
+            # independent of every other, so a serial loop made this stage cost
+            # the sum of N judge calls when it only ever needed the slowest one
+            # -- on a local-model deployment that was the single largest block
+            # of wall-clock in the entire run. llm_service's semaphore still
+            # bounds how many actually reach the provider at once.
+            async def judge(candidate: dict[str, Any]) -> dict[str, Any]:
                 verdict, result = await deps.evaluator.evaluate(
                     prompt_id=candidate["model_id"],
                     content=candidate["content"],
@@ -374,7 +390,6 @@ def build_nodes(deps: PipelineDependencies):
                     analysis=analysis,
                 )
                 payload = verdict.model_dump(mode="json")
-                verdicts.append(payload)
 
                 await _update_candidate(
                     run_id,
@@ -401,6 +416,13 @@ def build_nodes(deps: PipelineDependencies):
                     metrics=verdict.metrics,
                     evaluation=payload,
                 )
+                return payload
+
+            # gather preserves input order, so verdicts stay aligned with
+            # candidates regardless of which judge finishes first.
+            verdicts: list[dict[str, Any]] = list(
+                await asyncio.gather(*(judge(c) for c in candidates))
+            )
 
         elapsed = time.perf_counter() - started
         STAGE_LATENCY.labels("evaluation").observe(elapsed)

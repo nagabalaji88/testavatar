@@ -373,6 +373,7 @@ class PromptEvaluator:
                 system_prompt=JUDGE_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 phase="evaluation",
+                max_tokens=settings.judge_max_tokens,
                 timeout=settings.judge_timeout_seconds,
             )
             payload.setdefault("prompt_id", prompt_id)

@@ -215,6 +215,7 @@ class RequirementAnalyzer:
                 system_prompt=ANALYZER_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 phase="analysis",
+                max_tokens=settings.analysis_max_tokens,
             )
         except (LLMError, ValueError) as exc:
             logger.warning(
