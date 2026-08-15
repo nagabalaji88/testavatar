@@ -39,6 +39,21 @@
       "temperature": 0.4,
       "supports_json_mode": true,
       "weight": 1.0
+    },
+    {
+      "id": "ollama-cloud-llama2",
+      "name": "Llama 2 (Ollama Cloud)",
+      "provider": "Ollama",
+      "model_key": "llama2",
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": true,
+      "temperature": 0.4,
+      "supports_json_mode": false,
+      "api_base": "https://api.ollama.cloud/v1",
+      "api_key": "ollama-cloud-api-key-placeholder",
+      "weight": 1.0
     }
   ]
 }

@@ -121,6 +121,8 @@ LOCAL_PROVIDERS = frozenset({"ollama", "vllm", "llamacpp", "llama.cpp", "local",
 
 
 def _api_key_for(provider: ProviderConfig) -> Optional[str]:
+    if provider.api_key:
+        return provider.api_key
     mapping = {
         "openai": settings.openai_api_key,
         "anthropic": settings.anthropic_api_key,

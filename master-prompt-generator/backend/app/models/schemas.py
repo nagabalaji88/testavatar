@@ -205,6 +205,7 @@ class ProviderConfig(BaseModel):
     temperature: float = Field(default=0.4, ge=0, le=2)
     supports_json_mode: bool = True
     api_base: Optional[str] = None
+    api_key: Optional[str] = None
     weight: float = Field(default=1.0, gt=0)
 
     @field_validator("api_base")
