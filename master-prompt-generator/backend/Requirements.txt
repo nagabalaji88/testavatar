@@ -16,6 +16,11 @@ litellm==1.55.9
 sqlmodel==0.0.22
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
+# Driver for the default DATABASE_URL (sqlite+aiosqlite). Without it a fresh
+# install cannot boot on the shipped configuration at all -- the engine is
+# constructed at import time, so the failure is a traceback during startup
+# rather than an error on first query.
+aiosqlite==0.20.0
 alembic==1.14.0
 greenlet==3.1.1
 
