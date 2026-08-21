@@ -9,6 +9,14 @@ x-backend-env: &backend-env
   QDRANT_URL: http://qdrant:6333
   JWT_SECRET_KEY: ${JWT_SECRET_KEY:-please-change-this-secret}
   CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8080}
+  # Defaults true so a fresh local stack can bootstrap its first admin. Any
+  # ENVIRONMENT other than "local" refuses to start until this is false, so it
+  # has to be settable from here -- without it a production compose deploy
+  # would be unbootable with no way to satisfy the guard.
+  ALLOW_OPEN_REGISTRATION: ${ALLOW_OPEN_REGISTRATION:-true}
+  # Per-registry-entry credential for a hosted open-weight deployment; the
+  # models.json entry names this variable via api_key_env.
+  OLLAMA_CLOUD_API_KEY: ${OLLAMA_CLOUD_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
