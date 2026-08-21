@@ -39,6 +39,9 @@ class TokenPayload(BaseModel):
     jti: str
     exp: int
     iat: int
+    # Set only on a stream ticket, naming the single run it may open. Without
+    # it a ticket minted for one run would open any of them.
+    run_id: Optional[str] = None
 
 
 class Principal(BaseModel):
@@ -62,7 +65,13 @@ def verify_password(raw_password: str, hashed_password: str) -> bool:
         return False
 
 
-def _create_token(subject: str, role: Role, token_type: str, ttl_minutes: int) -> str:
+def _create_token(
+    subject: str,
+    role: Role,
+    token_type: str,
+    ttl_minutes: float,
+    **extra_claims: Any,
+) -> str:
     now = datetime.now(timezone.utc)
     payload: dict[str, Any] = {
         "sub": subject,
@@ -71,6 +80,7 @@ def _create_token(subject: str, role: Role, token_type: str, ttl_minutes: int) -
         "jti": uuid.uuid4().hex,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=ttl_minutes)).timestamp()),
+        **extra_claims,
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=ALGORITHM)
 
@@ -146,11 +156,72 @@ def require_role(required: Role):
     return _guard
 
 
-def authenticate_websocket(token: Optional[str]) -> Principal:
-    """Verify a token supplied as a websocket query parameter."""
+WS_TICKET_TYPE = "ws_ticket"
+
+
+def create_stream_ticket(subject: str, role: Role, run_id: str) -> str:
+    """Mint a single-use, short-lived credential for one run's event stream.
+
+    A websocket handshake cannot carry an Authorization header, so whatever
+    authenticates it travels in the URL -- and URLs are written to proxy logs,
+    access logs and browser history. Sending the access token there exposes an
+    hour-long, account-wide credential to all three. This ticket is scoped to
+    one run, expires in about a minute, and is burned on first use, so a copy
+    recovered from a log is worth nothing.
+    """
+    return _create_token(
+        subject,
+        role,
+        WS_TICKET_TYPE,
+        settings.ws_ticket_ttl_seconds / 60,
+        run_id=run_id,
+    )
+
+
+async def redeem_stream_ticket(ticket: Optional[str], run_id: str) -> Principal:
+    """Verify and consume a stream ticket, or raise HTTPException."""
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing ticket"
+        )
+    payload = decode_token(ticket, expected_type=WS_TICKET_TYPE)
+
+    if payload.run_id != run_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ticket was issued for a different run",
+        )
+
+    from app.core.revocation import revocation_store
+
+    # Also catches a ticket belonging to a session that has since logged out,
+    # because revoke_user covers every jti issued before that moment.
+    if await revocation_store.is_revoked(payload.jti, payload.sub, payload.iat):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Ticket already used"
+        )
+    await revocation_store.revoke_token(payload.jti, payload.exp)
+
+    return Principal(user_id=uuid.UUID(payload.sub), role=payload.role)
+
+
+async def authenticate_websocket(token: Optional[str]) -> Principal:
+    """Verify a full access token supplied as a websocket query parameter.
+
+    Retained for callers that have not moved to tickets. Unlike the previous
+    version this honours revocation, so a logged-out token no longer opens a
+    socket.
+    """
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token"
         )
     payload = decode_token(token)
+
+    from app.core.revocation import revocation_store
+
+    if await revocation_store.is_revoked(payload.jti, payload.sub, payload.iat):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked"
+        )
     return Principal(user_id=uuid.UUID(payload.sub), role=payload.role)

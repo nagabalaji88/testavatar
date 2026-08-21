@@ -246,3 +246,87 @@ class TestTokenClaims:
         token = create_refresh_token("11111111-1111-1111-1111-111111111111", Role.ADMIN)
         with pytest.raises(HTTPException):
             decode_token(token, expected_type="access")
+
+
+class TestClientFacingErrorText:
+    """A failed run's message is served from the run detail and log endpoints.
+
+    It is not built from a traceback, but provider SDKs put their own traceback
+    inside the exception text, so the effect is the same unless it is trimmed.
+    """
+
+    RAW = (
+        "RuntimeError: Every model failed during generation: "
+        "litellm.APIConnectionError: Missing Gemini API key.\n"
+        "Traceback (most recent call last):\n"
+        '  File "/usr/local/lib/python3.11/dist-packages/litellm/main.py", '
+        "line 647, in acompletion\n"
+        "    response = await init_response\n"
+        "ValueError: Missing Gemini API key.\n"
+    )
+
+    def test_paths_and_frames_do_not_reach_a_client(self) -> None:
+        from app.core.redaction import client_safe_error
+
+        served = client_safe_error(self.RAW, reveal_internals=False)
+        for internal in ("/usr/local", "dist-packages", "line 647", "Traceback", ".py"):
+            assert internal not in served, f"{internal!r} leaked to the client"
+
+    def test_the_actionable_part_survives(self) -> None:
+        """Redaction must not turn a diagnosable failure into a blank."""
+        from app.core.redaction import client_safe_error
+
+        served = client_safe_error(self.RAW, reveal_internals=False)
+        assert "Missing Gemini API key" in served
+        assert "Every model failed during generation" in served
+
+    def test_local_development_keeps_the_whole_message(self) -> None:
+        from app.core.redaction import client_safe_error
+
+        assert client_safe_error(self.RAW, reveal_internals=True) == self.RAW
+
+    def test_a_message_that_is_only_internals_still_says_something(self) -> None:
+        from app.core.redaction import client_safe_error
+
+        served = client_safe_error(
+            'Traceback (most recent call last):\n  File "/srv/app/x.py", line 2\n',
+            reveal_internals=False,
+        )
+        assert served
+        assert "/srv" not in served
+
+    def test_the_served_message_is_bounded(self) -> None:
+        from app.core.redaction import MAX_CLIENT_ERROR_CHARS, client_safe_error
+
+        served = client_safe_error("x" * 5000, reveal_internals=False)
+        assert len(served) <= MAX_CLIENT_ERROR_CHARS + 1
+
+
+class TestApiBaseResolutionStaysOffTheEventLoop:
+    def test_the_schema_validator_does_not_resolve(self) -> None:
+        """getaddrinfo blocks, and a field validator runs on the event loop."""
+        import inspect
+
+        from app.models.schemas import ProviderConfig
+
+        source = inspect.getsource(ProviderConfig._safe_api_base)
+        assert "resolve=False" in source
+
+    @pytest.mark.asyncio
+    async def test_the_async_form_still_rejects_a_name_resolving_inward(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.core.net import validate_api_base_async
+
+        monkeypatch.setattr("app.core.net._resolve", lambda _host: ["127.0.0.1"])
+        with pytest.raises(UnsafeEndpointError):
+            await validate_api_base_async("http://attacker.example.com/v1")
+
+    @pytest.mark.asyncio
+    async def test_the_admin_write_path_runs_the_resolving_check(self) -> None:
+        import inspect
+
+        from app.api.v1 import endpoints
+
+        source = inspect.getsource(endpoints.upsert_model)
+        assert "validate_api_base_async" in source

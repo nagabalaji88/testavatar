@@ -27,6 +27,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.events import EventType, event_bus
 from app.core.logging import get_logger
+from app.core.net import UnsafeEndpointError, validate_api_base_async
 from app.core.security import (
     Principal,
     oauth2_scheme,
@@ -34,9 +35,11 @@ from app.core.security import (
     authenticate_websocket,
     create_access_token,
     create_refresh_token,
+    create_stream_ticket,
     decode_token,
     get_current_principal,
     hash_password,
+    redeem_stream_ticket,
     require_role,
     verify_password,
 )
@@ -61,6 +64,7 @@ from app.models.schemas import (
     RunSummary,
     SemanticSearchHit,
     SemanticSearchRequest,
+    StreamTicket,
     TokenPair,
     UserCreate,
     UserRead,
@@ -566,6 +570,23 @@ async def semantic_search(
     )
 
 
+@runs_router.post("/{run_id}/stream-ticket", response_model=StreamTicket)
+async def issue_stream_ticket(
+    run_id: uuid.UUID, session: SessionDep, principal: CurrentUser
+) -> StreamTicket:
+    """Exchange a header-authenticated request for a ticket the socket accepts.
+
+    Ownership is checked here, where the Authorization header is available, so
+    the credential that ends up in the URL is already narrowed to one run.
+    """
+    run = await _load_run(session, run_id)
+    _authorize_run(run, principal)
+    return StreamTicket(
+        ticket=create_stream_ticket(str(principal.user_id), principal.role, str(run_id)),
+        expires_in=settings.ws_ticket_ttl_seconds,
+    )
+
+
 @runs_router.websocket("/{run_id}/stream")
 async def stream_run(
     websocket: WebSocket, run_id: uuid.UUID, session: SessionDep
@@ -580,9 +601,17 @@ async def stream_run(
     that check with _authorize_run, and the events streamed here carry the same
     generated content those routes guard, so the pairing has to hold here too.
     """
-    token = websocket.query_params.get("token")
     try:
-        principal = authenticate_websocket(token)
+        if ticket := websocket.query_params.get("ticket"):
+            principal = await redeem_stream_ticket(ticket, str(run_id))
+        else:
+            # Accepting a full access token here is the legacy path, kept so an
+            # older client keeps working. It is the weaker credential -- see
+            # create_stream_ticket -- and should be removed once no client
+            # sends it.
+            principal = await authenticate_websocket(
+                websocket.query_params.get("token")
+            )
         run = await _load_run(session, run_id)
         _authorize_run(run, principal)
     except HTTPException:
@@ -626,6 +655,16 @@ async def list_models(principal: CurrentUser) -> list[ProviderConfig]:
 
 @models_router.post("", response_model=ProviderPublic, status_code=status.HTTP_201_CREATED)
 async def upsert_model(payload: ProviderConfig, principal: AdminUser) -> ProviderConfig:
+    # The schema validator only ran the checks that cost nothing, so the
+    # resolving half happens here, off the event loop. This is the path an
+    # attacker-supplied api_base actually arrives on.
+    if payload.api_base:
+        try:
+            await validate_api_base_async(payload.api_base)
+        except UnsafeEndpointError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
     return model_registry.upsert(payload)
 
 

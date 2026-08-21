@@ -27,8 +27,10 @@ from sqlalchemy import select, update
 from app.agents.analyzer import RequirementAnalyzer, requirement_analyzer
 from app.agents.consensus import CandidateInput, ConsensusEngine, consensus_engine
 from app.agents.evaluator import PromptEvaluator, prompt_evaluator
+from app.core.config import settings
 from app.core.events import EventType, event_bus
 from app.core.logging import get_logger, run_id_ctx
+from app.core.redaction import client_safe_error
 from app.core.telemetry import (
     RUNS_COMPLETED,
     RUNS_IN_FLIGHT,
@@ -688,8 +690,14 @@ async def execute_pipeline(run_id: str, request: RunCreate, provider_ids: list[s
         with span("pipeline.run", **{"mpg.run_id": run_id}):
             await get_graph().ainvoke(initial)
     except Exception as exc:
-        message = f"{type(exc).__name__}: {exc}"
+        # logger.exception keeps the full text and the real traceback; every
+        # copy below is read back through the API, so each carries the trimmed
+        # version instead.
         logger.exception("run_failed", extra={"run_id": run_id})
+        message = client_safe_error(
+            f"{type(exc).__name__}: {exc}",
+            reveal_internals=settings.environment == "local",
+        )
         completed_at = datetime.now(timezone.utc)
         await _set_status(
             run_id, RunStatus.FAILED, error=message, completed_at=completed_at

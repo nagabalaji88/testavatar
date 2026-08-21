@@ -226,7 +226,11 @@ class ProviderConfig(BaseModel):
         from app.core.net import UnsafeEndpointError, validate_api_base
 
         try:
-            return validate_api_base(value)
+            # resolve=False: a field validator runs on the event loop, and
+            # getaddrinfo blocks it. The admin write path awaits the resolving
+            # form, so a value arriving from a request still gets the full
+            # check -- just not from here.
+            return validate_api_base(value, resolve=False)
         except UnsafeEndpointError as exc:
             raise ValueError(str(exc)) from exc
 
@@ -236,6 +240,13 @@ class ProviderConfig(BaseModel):
             + (output_tokens / 1000) * self.cost_per_1k_output,
             6,
         )
+
+
+class StreamTicket(BaseModel):
+    """Single-use credential for one run's websocket stream."""
+
+    ticket: str
+    expires_in: int
 
 
 class ProviderPublic(BaseModel):

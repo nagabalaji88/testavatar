@@ -158,3 +158,79 @@ class TestRunStreamIsAuthorized:
             if "_load_run(" in source and "_authorize_run(" not in source:
                 unguarded.append(name)
         assert not unguarded, f"these load a run without authorizing it: {unguarded}"
+
+
+class TestStreamTickets:
+    """A websocket handshake cannot carry a header, so its credential is in the URL.
+
+    URLs reach proxy logs, access logs and browser history, which is why what
+    goes there is a per-run, ~60s, single-use ticket rather than the account's
+    access token.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_ticket_opens_the_run_it_names(self) -> None:
+        from app.core.security import Role, create_stream_ticket, redeem_stream_ticket
+
+        user_id = "99999999-9999-9999-9999-999999999999"
+        run_id = "11111111-1111-1111-1111-111111111111"
+        ticket = create_stream_ticket(user_id, Role.ENGINEER, run_id)
+        principal = await redeem_stream_ticket(ticket, run_id)
+        assert str(principal.user_id) == user_id
+        assert principal.role is Role.ENGINEER
+
+    @pytest.mark.asyncio
+    async def test_a_ticket_is_burned_on_first_use(self) -> None:
+        from fastapi import HTTPException
+
+        from app.core.security import Role, create_stream_ticket, redeem_stream_ticket
+
+        run_id = "22222222-2222-2222-2222-222222222222"
+        ticket = create_stream_ticket("99999999-9999-9999-9999-999999999999", Role.ENGINEER, run_id)
+        await redeem_stream_ticket(ticket, run_id)
+        with pytest.raises(HTTPException):
+            await redeem_stream_ticket(ticket, run_id)
+
+    @pytest.mark.asyncio
+    async def test_a_ticket_does_not_open_a_different_run(self) -> None:
+        from fastapi import HTTPException
+
+        from app.core.security import Role, create_stream_ticket, redeem_stream_ticket
+
+        ticket = create_stream_ticket(
+            "99999999-9999-9999-9999-999999999999",
+            Role.ENGINEER,
+            "33333333-3333-3333-3333-333333333333",
+        )
+        with pytest.raises(HTTPException):
+            await redeem_stream_ticket(
+                ticket, "44444444-4444-4444-4444-444444444444"
+            )
+
+    @pytest.mark.asyncio
+    async def test_an_access_token_is_not_a_ticket(self) -> None:
+        """Otherwise the narrow credential could be swapped for the broad one."""
+        from fastapi import HTTPException
+
+        from app.core.security import Role, create_access_token, redeem_stream_ticket
+
+        token = create_access_token("99999999-9999-9999-9999-999999999999", Role.ENGINEER)
+        with pytest.raises(HTTPException):
+            await redeem_stream_ticket(
+                token, "55555555-5555-5555-5555-555555555555"
+            )
+
+    def test_a_ticket_expires_far_sooner_than_an_access_token(self) -> None:
+        import jwt
+
+        from app.core.config import settings
+        from app.core.security import ALGORITHM, Role, create_stream_ticket
+
+        claims = jwt.decode(
+            create_stream_ticket("99999999-9999-9999-9999-999999999999", Role.ENGINEER, "r"),
+            settings.jwt_secret_key,
+            algorithms=[ALGORITHM],
+        )
+        lifetime = claims["exp"] - claims["iat"]
+        assert lifetime <= settings.ws_ticket_ttl_seconds + 1
+        assert lifetime < settings.access_token_ttl_minutes * 60

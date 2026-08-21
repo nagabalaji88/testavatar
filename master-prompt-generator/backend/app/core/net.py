@@ -11,6 +11,7 @@ permitted by explicit name rather than blocked outright.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from urllib.parse import urlparse
@@ -58,8 +59,17 @@ def _resolve(host: str) -> list[str]:
     return [info[4][0] for info in infos]
 
 
-def validate_api_base(url: str) -> str:
-    """Return the URL if it is safe to call, else raise UnsafeEndpointError."""
+def validate_api_base(url: str, *, resolve: bool = True) -> str:
+    """Return the URL if it is safe to call, else raise UnsafeEndpointError.
+
+    resolve=False skips the DNS step and runs only the checks that cost
+    nothing. getaddrinfo is a blocking syscall, and this function is reached
+    from a pydantic field validator -- i.e. on the event loop while a request
+    is being served -- so a slow or hostile resolver would stall every other
+    connection for as long as it took to answer. The schema therefore does the
+    cheap half, and the admin write path awaits validate_api_base_async below,
+    which runs the same code with resolution on a worker thread.
+    """
     parsed = urlparse(url)
 
     if parsed.scheme.lower() not in ALLOWED_SCHEMES:
@@ -85,6 +95,9 @@ def validate_api_base(url: str) -> str:
             "permit it deliberately."
         )
 
+    if not resolve:
+        return url
+
     # A literal check alone only stops the obvious spelling. Any name the
     # attacker controls can be pointed at a private address -- localtest.me
     # resolves to 127.0.0.1 today, and a DNS record they own can answer with
@@ -102,3 +115,14 @@ def validate_api_base(url: str) -> str:
             )
 
     return url
+
+
+async def validate_api_base_async(url: str) -> str:
+    """validate_api_base with the DNS lookup moved off the event loop.
+
+    Use this anywhere an api_base arrives from a request. The cheap checks run
+    inline -- they are pure string work and reject the common cases without
+    touching the network -- and only the resolution is handed to a thread.
+    """
+    validate_api_base(url, resolve=False)
+    return await asyncio.to_thread(validate_api_base, url, resolve=True)

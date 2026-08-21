@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_ttl_minutes: int = 60
     refresh_token_ttl_minutes: int = 60 * 24 * 14
+    # A websocket handshake cannot carry a header, so its credential travels in
+    # the URL and lands in logs. Long enough to cover fetch-then-connect and a
+    # reconnect attempt; short enough that a ticket recovered from a log has
+    # almost certainly expired, on top of being single-use.
+    ws_ticket_ttl_seconds: int = 60
     # NoDecode: pydantic-settings otherwise attempts json.loads() on the raw env
     # string for any list-typed field before a validator ever sees it, and
     # "http://a,http://b" is not valid JSON -- the app would fail to boot the
