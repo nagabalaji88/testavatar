@@ -205,6 +205,15 @@ class ProviderConfig(BaseModel):
     temperature: float = Field(default=0.4, ge=0, le=2)
     supports_json_mode: bool = True
     api_base: Optional[str] = None
+    # Names the environment variable holding this model's credential, e.g.
+    # "OLLAMA_CLOUD_API_KEY". This is the supported way to give one specific
+    # registry entry its own key: models.json is tracked in git, .env is not,
+    # so the secret never lands in a commit.
+    api_key_env: Optional[str] = None
+    # Literal inline credential. Only safe when models.json is mounted from
+    # outside the repository (a Compose volume, a secrets mount); anything
+    # written here in the checked-in file will be committed. api_key_env wins
+    # when both are set.
     api_key: Optional[str] = None
     weight: float = Field(default=1.0, gt=0)
 

@@ -52,7 +52,7 @@
       "temperature": 0.4,
       "supports_json_mode": false,
       "api_base": "https://api.ollama.cloud/v1",
-      "api_key": "ollama-cloud-api-key-placeholder",
+      "api_key_env": "OLLAMA_CLOUD_API_KEY",
       "weight": 1.0
     }
   ]

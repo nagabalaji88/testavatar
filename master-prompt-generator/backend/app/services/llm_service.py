@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
 import re
 import time
@@ -121,6 +122,24 @@ LOCAL_PROVIDERS = frozenset({"ollama", "vllm", "llamacpp", "llama.cpp", "local",
 
 
 def _api_key_for(provider: ProviderConfig) -> Optional[str]:
+    """Resolve a provider's credential, most specific source first.
+
+    A per-entry key beats the per-provider-family key from settings, so two
+    registry entries pointing at the same family (a shared gateway and a
+    dedicated deployment, say) can authenticate independently.
+    """
+    if provider.api_key_env:
+        # An empty or unset variable is a missing credential, not the empty
+        # string: passing "" to litellm reads as "no auth" on some providers
+        # and as a malformed header on others, both of which fail further
+        # downstream with a much worse error than requires_credential's.
+        if key := os.environ.get(provider.api_key_env, "").strip():
+            return key
+        logger.warning(
+            "provider_api_key_env_unset",
+            extra={"model_id": provider.id, "api_key_env": provider.api_key_env},
+        )
+        return None
     if provider.api_key:
         return provider.api_key
     mapping = {
@@ -156,6 +175,12 @@ def _api_base_for(provider: ProviderConfig) -> Optional[str]:
 
 def requires_credential(provider: ProviderConfig) -> bool:
     """True when the provider needs an API key that is not currently set."""
+    # A hosted deployment of an open-weight model is only recognisable by the
+    # fact that the entry declares a credential source: `provider` still reads
+    # "Ollama", which would otherwise take the key-free path below and let a
+    # run start against an endpoint that answers 401 on every call.
+    if provider.api_key_env or provider.api_key:
+        return _api_key_for(provider) is None
     if provider.provider.strip().lower() in LOCAL_PROVIDERS:
         return False
     return _api_key_for(provider) is None

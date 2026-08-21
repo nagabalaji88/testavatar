@@ -124,3 +124,110 @@ class TestCloudRegistry:
 def test_registry_falls_back_to_defaults_for_a_missing_file(tmp_path: Path) -> None:
     registry = ModelRegistry(tmp_path / "absent.json")
     assert registry.enabled(), "a missing config must not leave zero providers"
+
+
+class TestPerEntryCredentials:
+    """A hosted deployment of an open-weight model needs its own key.
+
+    `provider` still reads "Ollama" for such an entry, so nothing about the
+    provider family distinguishes it from a keyless localhost runtime -- only
+    the declared credential source does.
+    """
+
+    def test_api_key_env_is_read_from_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MPG_TEST_CLOUD_KEY", "sk-from-environment")
+        provider = _provider(api_key_env="MPG_TEST_CLOUD_KEY")
+        assert _api_key_for(provider) == "sk-from-environment"
+        assert requires_credential(provider) is False
+
+    def test_api_key_env_beats_an_inline_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MPG_TEST_CLOUD_KEY", "sk-from-environment")
+        provider = _provider(
+            api_key_env="MPG_TEST_CLOUD_KEY", api_key="sk-inline-loses"
+        )
+        assert _api_key_for(provider) == "sk-from-environment"
+
+    def test_unset_api_key_env_reports_a_missing_credential(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MPG_TEST_CLOUD_KEY", raising=False)
+        provider = _provider(api_key_env="MPG_TEST_CLOUD_KEY")
+        assert _api_key_for(provider) is None
+        # The Ollama provider family would otherwise take the key-free path and
+        # let a run start against an endpoint that answers 401 on every call.
+        assert requires_credential(provider) is True
+
+    def test_blank_api_key_env_is_a_missing_credential_not_an_empty_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MPG_TEST_CLOUD_KEY", "   ")
+        provider = _provider(api_key_env="MPG_TEST_CLOUD_KEY")
+        assert _api_key_for(provider) is None
+
+    def test_keyless_local_runtime_is_unaffected(self) -> None:
+        assert requires_credential(_provider()) is False
+
+
+class TestDefaultSelectionSkipsUncredentialedProviders:
+    def _registry(self, tmp_path: Path, providers: list[dict]) -> ModelRegistry:
+        path = tmp_path / "models.json"
+        path.write_text(
+            json.dumps({"version": "1.0", "providers": providers}), encoding="utf-8"
+        )
+        return ModelRegistry(path)
+
+    def test_uncredentialed_entries_are_dropped_from_the_default_fan_out(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setattr(
+            "app.services.llm_service.settings.openai_api_key", None, raising=False
+        )
+        registry = self._registry(
+            tmp_path,
+            [
+                _provider(id="local-ok").model_dump(mode="json"),
+                _provider(
+                    id="cloud-no-key",
+                    provider="OpenAI",
+                    model_key="gpt-4o",
+                ).model_dump(mode="json"),
+            ],
+        )
+        assert [p.id for p in registry.resolve(None)] == ["local-ok"]
+
+    def test_an_explicit_selection_still_honours_an_uncredentialed_entry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Forcing a model must surface its real provider error, not a filter."""
+        monkeypatch.setattr(
+            "app.services.llm_service.settings.openai_api_key", None, raising=False
+        )
+        registry = self._registry(
+            tmp_path,
+            [
+                _provider(
+                    id="cloud-no-key", provider="OpenAI", model_key="gpt-4o"
+                ).model_dump(mode="json")
+            ],
+        )
+        assert [p.id for p in registry.resolve(["cloud-no-key"])] == ["cloud-no-key"]
+
+    def test_no_credentialed_provider_names_the_missing_variable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MPG_TEST_CLOUD_KEY", raising=False)
+        registry = self._registry(
+            tmp_path,
+            [
+                _provider(
+                    id="cloud-no-key", api_key_env="MPG_TEST_CLOUD_KEY"
+                ).model_dump(mode="json")
+            ],
+        )
+        with pytest.raises(UnknownProviderError, match="MPG_TEST_CLOUD_KEY"):
+            registry.resolve(None)

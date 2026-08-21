@@ -21,5 +21,7 @@ dist/
 
 # Runtime artefacts
 backend/config/models.json.tmp
+# Default SQLITE_DIRECTORY: a run's database, never part of the source tree.
+backend/data/
 *.log
 .DS_Store

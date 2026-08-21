@@ -112,11 +112,37 @@ class ModelRegistry:
         raise UnknownProviderError(provider_id)
 
     def resolve(self, provider_ids: Optional[list[str]]) -> list[ProviderConfig]:
-        """Resolve a requested selection, defaulting to every enabled provider."""
+        """Resolve a requested selection, defaulting to every credentialed provider.
+
+        Enabled-but-uncredentialed entries are dropped from the *default* fan-out
+        rather than dispatched: every one of them costs the full retry ladder
+        before failing, and a run whose models all lack keys dies several
+        seconds in with a wall of provider exceptions instead of saying which
+        credential is missing. An explicit selection is still honoured as
+        given, so an operator can always force a model and see its real error.
+        """
+        from app.services.llm_service import requires_credential
+
         if not provider_ids:
-            selected = self.enabled()
-            if not selected:
+            enabled = self.enabled()
+            if not enabled:
                 raise UnknownProviderError("no enabled providers are configured")
+            selected = [p for p in enabled if not requires_credential(p)]
+            if not selected:
+                raise UnknownProviderError(
+                    "every enabled provider is missing its credential: "
+                    + ", ".join(
+                        f"{p.id} (set {p.api_key_env})"
+                        if p.api_key_env
+                        else f"{p.id} ({p.provider})"
+                        for p in enabled
+                    )
+                )
+            if skipped := [p.id for p in enabled if requires_credential(p)]:
+                logger.warning(
+                    "providers_skipped_missing_credential",
+                    extra={"skipped": skipped},
+                )
             return selected
 
         resolved: list[ProviderConfig] = []
