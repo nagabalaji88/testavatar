@@ -12,6 +12,7 @@ permitted by explicit name rather than blocked outright.
 from __future__ import annotations
 
 import ipaddress
+import socket
 from urllib.parse import urlparse
 
 from app.core.config import settings
@@ -41,6 +42,22 @@ def _is_private(host: str) -> bool:
     )
 
 
+def _resolve(host: str) -> list[str]:
+    """Every address `host` currently resolves to, across both families.
+
+    A name that does not resolve is not treated as an error: the registry is
+    edited from an admin UI that may well be configuring an endpoint whose DNS
+    is not live yet, and refusing to save it would be a worse failure than
+    letting the call fail later. Nothing is admitted by this -- an unresolvable
+    name reaches nothing.
+    """
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        return []
+    return [info[4][0] for info in infos]
+
+
 def validate_api_base(url: str) -> str:
     """Return the URL if it is safe to call, else raise UnsafeEndpointError."""
     parsed = urlparse(url)
@@ -67,5 +84,21 @@ def validate_api_base(url: str) -> str:
             f"'{host}' is a private address. Add it to API_BASE_ALLOWLIST to "
             "permit it deliberately."
         )
+
+    # A literal check alone only stops the obvious spelling. Any name the
+    # attacker controls can be pointed at a private address -- localtest.me
+    # resolves to 127.0.0.1 today, and a DNS record they own can answer with
+    # 169.254.169.254 -- so the name has to be resolved and every answer
+    # checked before it is accepted.
+    for address in _resolve(host):
+        if str(address) in BLOCKED_ADDRESSES:
+            raise UnsafeEndpointError(
+                f"'{host}' resolves to {address}, an instance-metadata address"
+            )
+        if _is_private(str(address)):
+            raise UnsafeEndpointError(
+                f"'{host}' resolves to the private address {address}. Add the "
+                "host to API_BASE_ALLOWLIST to permit it deliberately."
+            )
 
     return url

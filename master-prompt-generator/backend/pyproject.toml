@@ -2,7 +2,7 @@
 name = "master-prompt-generator-backend"
 version = "1.0.0"
 description = "Multi-LLM consensus prompt engineering platform — backend"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

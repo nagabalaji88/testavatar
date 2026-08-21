@@ -106,6 +106,7 @@ class VectorService:
         target_domain: str,
         content: str,
         score: Optional[float],
+        owner_id: Optional[str] = None,
     ) -> Optional[str]:
         if not await self.ensure_collection():
             return None
@@ -124,6 +125,12 @@ class VectorService:
             "target_domain": target_domain,
             "score": score,
             "excerpt": content[:600],
+            # Carried so search can filter on it. A point written before this
+            # field existed has no owner and is unreachable by any non-admin
+            # search -- deliberately: the alternative is defaulting it to
+            # something that matches, which would serve exactly the prompts
+            # whose ownership is unknown.
+            "owner_id": owner_id,
         }
         try:
             await client.upsert(
@@ -138,8 +145,22 @@ class VectorService:
             return None
 
     async def search(
-        self, query: str, limit: int = 10, min_score: float = 0.0
+        self,
+        query: str,
+        limit: int = 10,
+        min_score: float = 0.0,
+        *,
+        owner_id: Optional[str],
+        include_all_owners: bool = False,
     ) -> list[SemanticSearchHit]:
+        """Search indexed prompts, restricted to one owner unless told otherwise.
+
+        owner_id is keyword-only and has no default: the collection spans every
+        tenant, so a caller that forgets to scope its search would otherwise
+        return other people's prompt content. Admins pass
+        include_all_owners=True to search the whole collection, mirroring the
+        admin branch in list_runs.
+        """
         if not await self.ensure_collection():
             return []
         vector = await self.embed(query)
@@ -147,12 +168,26 @@ class VectorService:
         if vector is None or client is None:
             return []
 
+        query_filter = None
+        if not include_all_owners:
+            if not owner_id:
+                return []
+            query_filter = qmodels.Filter(
+                must=[
+                    qmodels.FieldCondition(
+                        key="owner_id",
+                        match=qmodels.MatchValue(value=owner_id),
+                    )
+                ]
+            )
+
         try:
             hits = await client.search(
                 collection_name=settings.qdrant_collection,
                 query_vector=vector,
                 limit=limit,
                 score_threshold=min_score or None,
+                query_filter=query_filter,
             )
         except Exception as exc:
             logger.warning("qdrant_search_failed", extra={"error": str(exc)})

@@ -554,25 +554,49 @@ async def delete_run(
 async def semantic_search(
     payload: SemanticSearchRequest, principal: CurrentUser
 ) -> list[SemanticSearchHit]:
-    return await vector_service.search(payload.query, payload.limit, payload.min_score)
+    # The Qdrant collection spans every tenant, so the search is scoped to the
+    # caller. Admins search all of it, matching how list_runs and run_stats
+    # already widen for the admin role.
+    return await vector_service.search(
+        payload.query,
+        payload.limit,
+        payload.min_score,
+        owner_id=str(principal.user_id),
+        include_all_owners=principal.has_at_least(Role.ADMIN),
+    )
 
 
 @runs_router.websocket("/{run_id}/stream")
-async def stream_run(websocket: WebSocket, run_id: uuid.UUID) -> None:
+async def stream_run(
+    websocket: WebSocket, run_id: uuid.UUID, session: SessionDep
+) -> None:
     """Stream pipeline events for a run.
 
     The token is supplied as a query parameter because browsers cannot set
     headers on a websocket handshake.
+
+    Authenticating the token is not sufficient on its own: it establishes who
+    is calling, not whether they may read *this* run. Every REST route pairs
+    that check with _authorize_run, and the events streamed here carry the same
+    generated content those routes guard, so the pairing has to hold here too.
     """
     token = websocket.query_params.get("token")
     try:
-        authenticate_websocket(token)
+        principal = authenticate_websocket(token)
+        run = await _load_run(session, run_id)
+        _authorize_run(run, principal)
     except HTTPException:
+        # One close code for "bad token", "no such run" and "not yours": before
+        # the handshake completes there is no channel to carry a reason, and
+        # distinguishing them here would let a caller enumerate run ids.
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     await websocket.accept()
-    logger.info("websocket_connected", extra={"run_id": str(run_id)})
+    logger.info(
+        "websocket_connected",
+        extra={"run_id": str(run_id), "user_id": str(principal.user_id)},
+    )
 
     try:
         async for event in event_bus.subscribe(run_id):

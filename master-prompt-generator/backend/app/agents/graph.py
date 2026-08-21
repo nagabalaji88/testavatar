@@ -490,12 +490,25 @@ def build_nodes(deps: PipelineDependencies):
                 verdict.overall_score - best_candidate.verdict.overall_score, 2
             )
 
+            # Indexed alongside the vector so semantic search can scope results
+            # to the caller. Read from the run rather than threaded through the
+            # graph state, which does not carry the owner.
+            async with session_scope() as session:
+                owner_id = (
+                    await session.execute(
+                        select(PromptRun.owner_id).where(
+                            PromptRun.id == uuid.UUID(run_id)
+                        )
+                    )
+                ).scalar_one_or_none()
+
             point_id = await vector_service.index_prompt(
                 run_id=run_id,
                 title=request.title,
                 target_domain=request.target_domain,
                 content=result.content,
                 score=verdict.overall_score,
+                owner_id=str(owner_id) if owner_id else None,
             )
 
             async with session_scope() as session:

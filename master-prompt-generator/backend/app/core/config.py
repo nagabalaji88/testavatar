@@ -187,6 +187,26 @@ class Settings(BaseSettings):
             )
         if ":mpg@" in self.database_url or "://mpg:mpg" in self.database_url:
             problems.append("DATABASE_URL still uses the default mpg/mpg credentials.")
+        elif self.database_url == type(self).model_fields["database_url"].default:
+            # The default is the single-file SQLite path, which exists so a
+            # workstation needs no services. Reaching production on it means
+            # nobody set DATABASE_URL: the data then lives on container-local
+            # disk and disappears with the container. Comparing against the
+            # field default rather than matching on "sqlite" keeps a
+            # deliberate, explicitly-configured SQLite deployment possible.
+            problems.append(
+                "DATABASE_URL is still the built-in SQLite default, so the "
+                "database would live on container-local disk. Point it at a "
+                "real database, e.g. postgresql+asyncpg://user:pw@host:5432/db"
+            )
+
+        if self.allow_open_registration:
+            # Anyone who can reach the service can mint an account, and the
+            # first one created is promoted to admin.
+            problems.append(
+                "ALLOW_OPEN_REGISTRATION must be false outside local: it lets "
+                "anyone who can reach the service create an account."
+            )
 
         if problems:
             raise ValueError(

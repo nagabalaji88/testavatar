@@ -89,6 +89,64 @@ class TestApiBaseSsrf:
             _provider("http://169.254.169.254/")
         assert _provider("http://ollama:11434").api_base == "http://ollama:11434"
 
+    # -- names that resolve inward -------------------------------------------
+    # Checking the literal spelling only stops the obvious attempt. Any name
+    # the attacker controls can point at a private address, so resolution is
+    # part of the check. Resolution is stubbed here so the suite does not
+    # depend on a live lookup.
+
+    @pytest.mark.parametrize(
+        ("resolved", "expected"),
+        [
+            (["127.0.0.1"], "private address"),
+            (["169.254.169.254"], "instance-metadata"),
+            (["10.1.2.3"], "private address"),
+            (["::1"], "private address"),
+            # One public answer is not a pass if another is internal: the
+            # client may connect to either.
+            (["93.184.216.34", "192.168.0.10"], "private address"),
+        ],
+    )
+    def test_a_public_name_resolving_inward_is_rejected(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        resolved: list[str],
+        expected: str,
+    ) -> None:
+        monkeypatch.setattr("app.core.net._resolve", lambda _host: resolved)
+        with pytest.raises(UnsafeEndpointError, match=expected):
+            validate_api_base("http://attacker-controlled.example.com/v1")
+
+    def test_a_public_name_resolving_outward_is_allowed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("app.core.net._resolve", lambda _host: ["93.184.216.34"])
+        url = "https://api.example.com/v1"
+        assert validate_api_base(url) == url
+
+    def test_an_allowlisted_host_is_not_second_guessed_by_dns(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Local runtimes are allowlisted precisely because they are private."""
+
+        def _boom(_host: str) -> list[str]:  # pragma: no cover - must not run
+            raise AssertionError("an allowlisted host must not be resolved")
+
+        monkeypatch.setattr("app.core.net._resolve", _boom)
+        assert validate_api_base("http://ollama:11434") == "http://ollama:11434"
+
+    def test_an_unresolvable_name_is_not_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Saving an entry whose DNS is not live yet must still work.
+
+        Nothing is admitted by this: a name that resolves to nothing reaches
+        nothing.
+        """
+        monkeypatch.setattr("app.core.net._resolve", lambda _host: [])
+        url = "https://not-live-yet.example.com/v1"
+        assert validate_api_base(url) == url
+
 
 class TestDeploymentGuards:
     """A non-local deployment must not boot on shipped defaults."""
@@ -118,14 +176,48 @@ class TestDeploymentGuards:
 
     def test_production_refuses_default_database_credentials(self) -> None:
         with pytest.raises(ValidationError) as exc:
-            Settings(environment="production", jwt_secret_key="x" * 48)
+            Settings(
+                environment="production",
+                jwt_secret_key="x" * 48,
+                database_url="postgresql+asyncpg://mpg:mpg@db:5432/mpg",
+            )
         assert "DATABASE_URL" in str(exc.value)
+
+    def test_production_refuses_the_builtin_sqlite_default(self) -> None:
+        """The single-file default exists so a workstation needs no services.
+
+        Reaching production on it means DATABASE_URL was never set, and the
+        data would live on container-local disk.
+        """
+        with pytest.raises(ValidationError) as exc:
+            Settings(environment="production", jwt_secret_key="x" * 48)
+        assert "SQLite default" in str(exc.value)
+
+    def test_production_allows_a_deliberate_sqlite_url(self) -> None:
+        """Only the untouched default is refused, not SQLite as a choice."""
+        settings = Settings(
+            environment="production",
+            jwt_secret_key="x" * 48,
+            allow_open_registration=False,
+            database_url="sqlite+aiosqlite:////var/lib/mpg/mpg.db",
+        )
+        assert settings.is_production
+
+    def test_production_refuses_open_registration(self) -> None:
+        with pytest.raises(ValidationError) as exc:
+            Settings(
+                environment="production",
+                jwt_secret_key="x" * 48,
+                database_url="postgresql+asyncpg://u:s3cret-pw@db:5432/mpg",
+            )
+        assert "ALLOW_OPEN_REGISTRATION" in str(exc.value)
 
     def test_a_correctly_configured_production_boots(self) -> None:
         settings = Settings(
             environment="production",
             jwt_secret_key="x" * 48,
             cors_origins=["https://mpg.example.com"],
+            allow_open_registration=False,
             database_url="postgresql+asyncpg://mpg:s3cret-pw@db:5432/mpg",
         )
         assert settings.is_production
