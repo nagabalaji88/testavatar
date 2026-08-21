@@ -43,6 +43,7 @@ from litellm.exceptions import (
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.pinned_transport import build_pinned_client
 from app.core.telemetry import LLM_CALLS, LLM_COST, LLM_LATENCY, LLM_TOKENS, span
 from app.models.schemas import ProviderConfig
 
@@ -51,6 +52,14 @@ logger = get_logger(__name__)
 litellm.drop_params = True
 litellm.set_verbose = False
 litellm.suppress_debug_info = True
+
+# Every outbound provider call goes through a transport that resolves the
+# hostname, validates the answers and then connects to the address it just
+# checked. Validating api_base when it is saved cannot cover this on its own:
+# a registry entry outlives its validation by days, so a name accepted while
+# it pointed somewhere harmless can be repointed afterwards without any race
+# at all. See app/core/pinned_transport.
+litellm.aclient_session = build_pinned_client()
 
 RETRYABLE: tuple[type[Exception], ...] = (
     RateLimitError,

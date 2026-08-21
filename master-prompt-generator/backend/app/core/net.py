@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+from typing import Optional
 from urllib.parse import urlparse
 
 from app.core.config import settings
@@ -115,6 +116,46 @@ def validate_api_base(url: str, *, resolve: bool = True) -> str:
             )
 
     return url
+
+
+async def pick_safe_address(host: str) -> Optional[str]:
+    """Resolve `host` and return one address that passed validation.
+
+    Returns the address rather than a yes/no so the caller can connect to the
+    exact one that was checked. Answering "this name is fine" and then letting
+    the socket resolve it again is what leaves the rebind window open: the
+    second lookup can return something the first never saw.
+
+    None means the name did not resolve. An address that fails validation
+    raises, because a name that answers with a private address is an attempt at
+    something, not a misconfiguration.
+    """
+    if host in BLOCKED_ADDRESSES:
+        raise UnsafeEndpointError(f"'{host}' is an instance-metadata address")
+    if host.strip().lower() in {
+        entry.strip().lower() for entry in settings.api_base_allowlist
+    }:
+        # Allowlisted precisely because it is private -- pinning it would only
+        # break the local runtimes this exists to permit.
+        return None
+
+    addresses = await asyncio.to_thread(_resolve, host)
+    if not addresses:
+        return None
+
+    for address in addresses:
+        if address in BLOCKED_ADDRESSES:
+            raise UnsafeEndpointError(
+                f"'{host}' resolves to {address}, an instance-metadata address"
+            )
+        if _is_private(address):
+            raise UnsafeEndpointError(
+                f"'{host}' resolves to the private address {address}"
+            )
+
+    # Every answer passed, so any of them is safe; the first is what a normal
+    # resolver would have handed the socket anyway.
+    return addresses[0]
 
 
 async def validate_api_base_async(url: str) -> str:
