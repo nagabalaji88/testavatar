@@ -70,6 +70,11 @@ from app.models.schemas import (
     UserRead,
 )
 from app.services.export_service import export_consensus
+from app.services.llm_service import (
+    credential_env_var,
+    is_local_runtime,
+    requires_credential,
+)
 from app.services.model_registry import UnknownProviderError, model_registry
 from app.services.vector_service import vector_service
 
@@ -648,9 +653,25 @@ async def stream_run(
 # ---------------------------------------------------------------------------
 
 
+def _to_public(provider: ProviderConfig) -> ProviderPublic:
+    """Registry entry plus whether it can actually be called right now.
+
+    Computed per request rather than stored: a credential arrives from the
+    environment, so the same registry file is answerable differently on two
+    deployments, and restarting with a key set must change the answer without
+    anyone editing models.json.
+    """
+    return ProviderPublic(
+        **provider.model_dump(exclude={"api_key"}),
+        credential_available=not requires_credential(provider),
+        credential_env_var=credential_env_var(provider),
+        is_local_runtime=is_local_runtime(provider),
+    )
+
+
 @models_router.get("", response_model=list[ProviderPublic])
-async def list_models(principal: CurrentUser) -> list[ProviderConfig]:
-    return model_registry.all()
+async def list_models(principal: CurrentUser) -> list[ProviderPublic]:
+    return [_to_public(provider) for provider in model_registry.all()]
 
 
 @models_router.post("", response_model=ProviderPublic, status_code=status.HTTP_201_CREATED)
@@ -665,7 +686,7 @@ async def upsert_model(payload: ProviderConfig, principal: AdminUser) -> Provide
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
             ) from exc
-    return model_registry.upsert(payload)
+    return _to_public(model_registry.upsert(payload))
 
 
 @models_router.patch("/{provider_id}", response_model=ProviderPublic)
@@ -673,7 +694,7 @@ async def toggle_model(
     provider_id: str, payload: ProviderToggle, principal: AdminUser
 ) -> ProviderConfig:
     try:
-        return model_registry.set_enabled(provider_id, payload.enabled)
+        return _to_public(model_registry.set_enabled(provider_id, payload.enabled))
     except UnknownProviderError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown provider: {exc}"
@@ -692,8 +713,8 @@ async def delete_model(provider_id: str, principal: AdminUser) -> Response:
 
 
 @models_router.post("/reload", response_model=list[ProviderPublic])
-async def reload_models(principal: AdminUser) -> list[ProviderConfig]:
-    return model_registry.reload().providers
+async def reload_models(principal: AdminUser) -> list[ProviderPublic]:
+    return [_to_public(p) for p in model_registry.reload().providers]
 
 
 # ---------------------------------------------------------------------------

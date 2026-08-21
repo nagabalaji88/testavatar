@@ -90,12 +90,25 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
 
   const enabled = useMemo(() => models.filter((model) => model.enabled), [models]);
 
+  // A model without a credential is dispatched, fails its whole retry ladder
+  // and is dropped from the run — so offering it as a choice is offering
+  // something that cannot happen. Local runtimes need no key and are always
+  // available.
+  const usable = useMemo(
+    () => enabled.filter((model) => model.credential_available),
+    [enabled],
+  );
+  const blocked = useMemo(
+    () => enabled.filter((model) => !model.credential_available),
+    [enabled],
+  );
+
   const mutation = useMutation({
     mutationFn: (payload: RunCreatePayload) => api.createRun(payload),
     onSuccess: onLaunched,
   });
 
-  const chosen = selected.length ? selected : enabled.map((model) => model.id);
+  const chosen = selected.length ? selected : usable.map((model) => model.id);
   const valid = title.trim().length >= 3 && businessProblem.trim().length >= 20 && targetDomain.trim().length >= 2;
 
   const submit = (event: FormEvent) => {
@@ -232,7 +245,7 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
             Models ({chosen.length} selected)
           </span>
           <div className="flex flex-wrap gap-2">
-            {enabled.map((model) => {
+            {usable.map((model) => {
               const active = chosen.includes(model.id);
               return (
                 <button
@@ -254,16 +267,46 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
                   )}
                 >
                   {model.name}
-                  <span className="ml-2 text-faint">{model.provider}</span>
+                  <span className="ml-2 text-faint">
+                    {model.is_local_runtime ? 'local' : model.provider}
+                  </span>
                 </button>
               );
             })}
-            {!enabled.length ? (
+            {!usable.length ? (
               <p className="text-[12px] text-faint">
-                No providers are enabled — add one in the model registry.
+                {enabled.length
+                  ? 'No model has a key set. Add one to your .env and restart, or run a local Ollama model — those need no key.'
+                  : 'No providers are enabled — add one in the model registry.'}
               </p>
             ) : null}
           </div>
+
+          {blocked.length ? (
+            <div className="mt-3 rounded-xl bg-white/[0.03] px-3 py-2.5 ring-1 ring-inset ring-white/10">
+              <p className="mb-1.5 text-[12px] font-medium text-dim">
+                Needs a key before it can be selected
+              </p>
+              <ul className="space-y-1">
+                {blocked.map((model) => (
+                  <li
+                    key={model.id}
+                    className="flex flex-wrap items-baseline gap-x-2 text-[12px] text-faint"
+                  >
+                    <span>{model.name}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>
+                      set{' '}
+                      <code className="rounded bg-white/8 px-1 py-0.5 font-mono text-[11px] text-dim">
+                        {model.credential_env_var ?? 'its API key'}
+                      </code>{' '}
+                      in .env, then restart
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
 
         {mutation.isError ? (

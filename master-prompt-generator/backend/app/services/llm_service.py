@@ -165,6 +165,45 @@ def _api_key_for(provider: ProviderConfig) -> Optional[str]:
     return mapping.get(provider.provider.strip().lower())
 
 
+# The variable each provider family reads, so the UI can name the one to set
+# rather than just reporting that something is missing. Kept beside the mapping
+# above because the two have to agree: a family here that is absent there would
+# tell an operator to set a variable nothing reads.
+PROVIDER_KEY_ENV_VARS: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "google": "GEMINI_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "togetherai": "TOGETHER_API_KEY",
+    "huggingface": "HUGGINGFACE_API_KEY",
+}
+
+
+def credential_env_var(provider: ProviderConfig) -> Optional[str]:
+    """Name the environment variable this entry's credential comes from.
+
+    The name, never the value. None means no variable applies -- a local
+    runtime that takes no credential, or an entry carrying an inline key.
+    """
+    if provider.api_key_env:
+        return provider.api_key_env
+    if provider.api_key:
+        return None
+    return PROVIDER_KEY_ENV_VARS.get(provider.provider.strip().lower())
+
+
+def is_local_runtime(provider: ProviderConfig) -> bool:
+    """True for a model served from your own hardware, which needs no key."""
+    if provider.api_key_env or provider.api_key:
+        # A hosted deployment of an open-weight model still reads "Ollama" in
+        # `provider`; declaring a credential is what distinguishes it.
+        return False
+    return provider.provider.strip().lower() in LOCAL_PROVIDERS
+
+
 def _api_base_for(provider: ProviderConfig) -> Optional[str]:
     """Resolve the endpoint, defaulting local runtimes to their configured host.
 

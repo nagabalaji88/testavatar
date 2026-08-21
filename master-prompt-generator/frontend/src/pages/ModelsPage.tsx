@@ -43,6 +43,7 @@ export function ModelsPage() {
                 <th scope="col" className="pb-2 font-medium">$ / 1k in</th>
                 <th scope="col" className="pb-2 font-medium">$ / 1k out</th>
                 <th scope="col" className="pb-2 font-medium">JSON mode</th>
+                <th scope="col" className="pb-2 font-medium">Credential</th>
                 <th scope="col" className="pb-2 font-medium">Enabled</th>
               </tr>
             </thead>
@@ -67,6 +68,21 @@ export function ModelsPage() {
                     <Badge tone={model.supports_json_mode ? 'success' : 'neutral'}>
                       {model.supports_json_mode ? 'native' : 'prompted'}
                     </Badge>
+                  </td>
+                  {/* Enabled and callable are different things: an enabled
+                      model with no key is dropped from the run. */}
+                  <td className="py-2.5 pr-3">
+                    {model.is_local_runtime ? (
+                      <Badge tone="success">local · no key</Badge>
+                    ) : model.credential_available ? (
+                      <Badge tone="success">
+                        {model.credential_env_var ?? 'key set'}
+                      </Badge>
+                    ) : (
+                      <Badge tone="warning">
+                        set {model.credential_env_var ?? 'API key'}
+                      </Badge>
+                    )}
                   </td>
                   <td className="py-2.5">
                     <Switch.Root

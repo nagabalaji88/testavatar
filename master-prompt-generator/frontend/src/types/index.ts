@@ -61,7 +61,16 @@ export interface ProviderConfig {
   temperature: number;
   supports_json_mode: boolean;
   api_base?: string | null;
+  api_key_env?: string | null;
   weight: number;
+  /** Whether the model can actually be called right now. `enabled` only says
+   *  an operator wants it; without a key the run drops it. */
+  credential_available: boolean;
+  /** Which environment variable supplies the key — the name, never the value.
+   *  Null for a local runtime, which needs none. */
+  credential_env_var?: string | null;
+  /** Served from your own hardware, so no key applies. Not a missing key. */
+  is_local_runtime: boolean;
 }
 
 export interface RequirementAnalysis {

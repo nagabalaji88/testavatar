@@ -275,6 +275,19 @@ class ProviderPublic(BaseModel):
     api_key_env: Optional[str] = None
     weight: float
 
+    # --- credential state -------------------------------------------------
+    # Whether this entry can actually be called right now. "Enabled" only says
+    # an operator wants it; without a key it is dispatched, fails its whole
+    # retry ladder and is dropped, which from the UI looks like a model that
+    # silently did nothing.
+    credential_available: bool = True
+    # The variable the credential is read from -- the name, never the value --
+    # so the UI can say which one to set instead of only that one is missing.
+    credential_env_var: Optional[str] = None
+    # Served from your own hardware, so no credential applies at all. This is
+    # not the same as "credential missing" and should not read as a problem.
+    is_local_runtime: bool = False
+
 
 class ProviderRegistryConfig(BaseModel):
     version: str = "1.0"

@@ -276,3 +276,84 @@ class TestCredentialsAreNotServedByTheApi:
             and r.response_model in (ProviderConfig, list[ProviderConfig])
         ]
         assert not leaking, f"these serve the inline api_key: {leaking}"
+
+
+class TestCredentialStateIsReportedToTheUi:
+    """"Enabled" and "callable" are different things.
+
+    An enabled model with no key is dispatched, burns its whole retry ladder
+    and is dropped from the run, which from the UI looks like a model that
+    silently did nothing. The listing therefore says which entries can actually
+    be called, and names the variable to set for the ones that cannot.
+    """
+
+    def _public(self, provider: ProviderConfig):
+        from app.api.v1.endpoints import _to_public
+
+        return _to_public(provider)
+
+    def test_a_local_runtime_is_available_and_needs_no_variable(self) -> None:
+        pub = self._public(_provider())
+        assert pub.credential_available is True
+        assert pub.is_local_runtime is True
+        assert pub.credential_env_var is None
+
+    def test_a_cloud_model_without_its_key_is_reported_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "app.services.llm_service.settings.openai_api_key", None, raising=False
+        )
+        pub = self._public(
+            _provider(id="gpt", provider="OpenAI", model_key="gpt-4o")
+        )
+        assert pub.credential_available is False
+        assert pub.is_local_runtime is False
+        # Naming the variable is the point: "unavailable" alone leaves the
+        # operator guessing which of eight keys is the missing one.
+        assert pub.credential_env_var == "OPENAI_API_KEY"
+
+    def test_a_cloud_model_with_its_key_is_reported_available(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "app.services.llm_service.settings.anthropic_api_key",
+            "sk-ant-present",
+            raising=False,
+        )
+        pub = self._public(
+            _provider(
+                id="claude",
+                provider="Anthropic",
+                model_key="anthropic/claude-sonnet-5",
+            )
+        )
+        assert pub.credential_available is True
+        assert pub.credential_env_var == "ANTHROPIC_API_KEY"
+
+    def test_a_hosted_open_weight_model_is_not_mistaken_for_a_local_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """It still reads "Ollama"; the declared credential is the difference."""
+        monkeypatch.delenv("MPG_TEST_CLOUD_KEY", raising=False)
+        pub = self._public(
+            _provider(id="ollama-cloud", api_key_env="MPG_TEST_CLOUD_KEY")
+        )
+        assert pub.is_local_runtime is False
+        assert pub.credential_available is False
+        assert pub.credential_env_var == "MPG_TEST_CLOUD_KEY"
+
+    def test_every_family_the_resolver_reads_can_also_be_named(self) -> None:
+        """A family missing from the name map would report an unsettable key."""
+        from app.services.llm_service import PROVIDER_KEY_ENV_VARS
+
+        for family in PROVIDER_KEY_ENV_VARS:
+            pub = self._public(_provider(id=family, provider=family))
+            assert pub.credential_env_var, f"{family} reports no variable to set"
+
+    def test_the_listing_still_withholds_the_key_itself(self) -> None:
+        """Reporting availability must not become a way to read the value."""
+        served = self._public(
+            _provider(api_key="sk-inline-must-not-be-served")
+        ).model_dump(mode="json")
+        assert "sk-inline-must-not-be-served" not in json.dumps(served)
