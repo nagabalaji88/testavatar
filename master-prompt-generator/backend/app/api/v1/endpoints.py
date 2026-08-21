@@ -51,6 +51,7 @@ from app.models.schemas import (
     ExportRequest,
     HealthReport,
     ProviderConfig,
+    ProviderPublic,
     ProviderToggle,
     RefreshRequest,
     RoleUpdate,
@@ -594,17 +595,17 @@ async def stream_run(websocket: WebSocket, run_id: uuid.UUID) -> None:
 # ---------------------------------------------------------------------------
 
 
-@models_router.get("", response_model=list[ProviderConfig])
+@models_router.get("", response_model=list[ProviderPublic])
 async def list_models(principal: CurrentUser) -> list[ProviderConfig]:
     return model_registry.all()
 
 
-@models_router.post("", response_model=ProviderConfig, status_code=status.HTTP_201_CREATED)
+@models_router.post("", response_model=ProviderPublic, status_code=status.HTTP_201_CREATED)
 async def upsert_model(payload: ProviderConfig, principal: AdminUser) -> ProviderConfig:
     return model_registry.upsert(payload)
 
 
-@models_router.patch("/{provider_id}", response_model=ProviderConfig)
+@models_router.patch("/{provider_id}", response_model=ProviderPublic)
 async def toggle_model(
     provider_id: str, payload: ProviderToggle, principal: AdminUser
 ) -> ProviderConfig:
@@ -627,7 +628,7 @@ async def delete_model(provider_id: str, principal: AdminUser) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@models_router.post("/reload", response_model=list[ProviderConfig])
+@models_router.post("/reload", response_model=list[ProviderPublic])
 async def reload_models(principal: AdminUser) -> list[ProviderConfig]:
     return model_registry.reload().providers
 

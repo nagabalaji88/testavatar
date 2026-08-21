@@ -238,6 +238,33 @@ class ProviderConfig(BaseModel):
         )
 
 
+class ProviderPublic(BaseModel):
+    """A registry entry as the API is allowed to return it.
+
+    ProviderConfig carries the inline api_key, and GET /models is readable by
+    any authenticated principal -- with open registration on, that is anyone
+    who can reach the service. Serialising the model directly hands the
+    credential to every caller, so responses are narrowed to this shape.
+
+    api_key_env survives: the *name* of a variable is not a secret, and an
+    operator debugging a misconfigured entry needs to see which one it reads.
+    """
+
+    id: str
+    name: str
+    provider: str
+    model_key: str
+    max_tokens: int
+    cost_per_1k_input: float
+    cost_per_1k_output: float
+    enabled: bool
+    temperature: float
+    supports_json_mode: bool
+    api_base: Optional[str] = None
+    api_key_env: Optional[str] = None
+    weight: float
+
+
 class ProviderRegistryConfig(BaseModel):
     version: str = "1.0"
     providers: list[ProviderConfig]

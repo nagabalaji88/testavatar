@@ -231,3 +231,48 @@ class TestDefaultSelectionSkipsUncredentialedProviders:
         )
         with pytest.raises(UnknownProviderError, match="MPG_TEST_CLOUD_KEY"):
             registry.resolve(None)
+
+
+class TestCredentialsAreNotServedByTheApi:
+    """GET /models is readable by any authenticated principal.
+
+    With open registration on -- the default -- that is anyone who can reach
+    the service, so the response shape must not carry the inline credential.
+    """
+
+    def test_public_shape_has_no_api_key_field(self) -> None:
+        from app.models.schemas import ProviderPublic
+
+        assert "api_key" not in ProviderPublic.model_fields
+        # The variable *name* is not a secret and stays visible, so an operator
+        # can see which variable a misconfigured entry reads.
+        assert "api_key_env" in ProviderPublic.model_fields
+
+    def test_an_inline_key_is_dropped_when_narrowed_to_the_public_shape(self) -> None:
+        from app.models.schemas import ProviderPublic
+
+        secret = "sk-inline-must-not-be-served"
+        entry = _provider(api_key=secret, api_key_env="SOME_VAR")
+        assert entry.api_key == secret, "the registry itself still needs the key"
+
+        served = ProviderPublic.model_validate(
+            entry.model_dump(mode="json")
+        ).model_dump(mode="json")
+        assert secret not in json.dumps(served)
+        assert served["api_key_env"] == "SOME_VAR"
+
+    def test_no_models_route_serves_the_credential_bearing_shape(self) -> None:
+        """The leak was a response_model, so assert on the wiring itself.
+
+        Written as a sweep rather than a check of one route: the first fix
+        missed POST /models/reload, which returned the same shape.
+        """
+        from app.api.v1.endpoints import models_router
+
+        leaking = [
+            f"{sorted(r.methods)} {r.path}"
+            for r in models_router.routes
+            if hasattr(r, "methods")
+            and r.response_model in (ProviderConfig, list[ProviderConfig])
+        ]
+        assert not leaking, f"these serve the inline api_key: {leaking}"
