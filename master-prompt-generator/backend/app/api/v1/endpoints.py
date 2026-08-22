@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Any, Optional
@@ -28,6 +29,7 @@ from app.core.config import settings
 from app.core.events import EventType, event_bus
 from app.core.logging import get_logger
 from app.core.net import UnsafeEndpointError, validate_api_base_async
+from app.core.provider_families import FAMILIES_BY_NAME, PROVIDER_FAMILIES
 from app.core.security import (
     Principal,
     oauth2_scheme,
@@ -47,16 +49,30 @@ from app.core.ratelimit import client_identity, rate_limiter
 from app.core.revocation import revocation_store
 from app.core.telemetry import RUNS_STARTED
 from app.db.session import get_session
-from app.models.domain import ConsensusPrompt, ExecutionLog, PromptRun, RunStatus, User
+from app.models.domain import (
+    ConsensusPrompt,
+    ExecutionLog,
+    PromptRun,
+    ProviderCredential,
+    RunStatus,
+    User,
+)
 from app.models.schemas import (
     METRIC_DEFINITIONS,
     ConsensusRead,
+    CredentialStatus,
+    CredentialTestResult,
+    CredentialWrite,
+    DiscoveredModelPublic,
     ExportRequest,
+    FamilyDiscoveryPublic,
     HealthReport,
     ProviderConfig,
     ProviderPublic,
     ProviderToggle,
     RefreshRequest,
+    RegistryImportRequest,
+    RegistryImportResult,
     RoleUpdate,
     RunAccepted,
     RunCreate,
@@ -69,12 +85,16 @@ from app.models.schemas import (
     UserCreate,
     UserRead,
 )
+from app.services.credential_store import credential_store
 from app.services.export_service import export_consensus
 from app.services.llm_service import (
     credential_env_var,
+    credential_family,
+    credential_source,
     is_local_runtime,
     requires_credential,
 )
+from app.services.model_discovery import model_discovery
 from app.services.model_registry import UnknownProviderError, model_registry
 from app.services.vector_service import vector_service
 
@@ -657,20 +677,28 @@ def _to_public(provider: ProviderConfig) -> ProviderPublic:
     """Registry entry plus whether it can actually be called right now.
 
     Computed per request rather than stored: a credential arrives from the
-    environment, so the same registry file is answerable differently on two
-    deployments, and restarting with a key set must change the answer without
-    anyone editing models.json.
+    environment or the credential store, so the same registry file is
+    answerable differently on two deployments, and setting a key has to change
+    the answer without anyone editing models.json.
     """
     return ProviderPublic(
         **provider.model_dump(exclude={"api_key"}),
         credential_available=not requires_credential(provider),
         credential_env_var=credential_env_var(provider),
         is_local_runtime=is_local_runtime(provider),
+        credential_family=credential_family(provider),
+        credential_source=credential_source(provider),
     )
 
 
 @models_router.get("", response_model=list[ProviderPublic])
-async def list_models(principal: CurrentUser) -> list[ProviderPublic]:
+async def list_models(
+    principal: CurrentUser, session: SessionDep
+) -> list[ProviderPublic]:
+    # The listing is what the UI decides selectability from, so it must not be
+    # answered from a credential snapshot that predates an edit made in another
+    # process. Cheap: one query at most every TTL_SECONDS.
+    await credential_store.refresh_if_stale(session)
     return [_to_public(provider) for provider in model_registry.all()]
 
 
@@ -715,6 +743,304 @@ async def delete_model(provider_id: str, principal: AdminUser) -> Response:
 @models_router.post("/reload", response_model=list[ProviderPublic])
 async def reload_models(principal: AdminUser) -> list[ProviderPublic]:
     return [_to_public(p) for p in model_registry.reload().providers]
+
+
+# --- live provider catalogue ------------------------------------------------
+
+
+@models_router.get("/catalog", response_model=list[FamilyDiscoveryPublic])
+async def model_catalog(
+    principal: AdminUser,
+    session: SessionDep,
+    refresh: bool = Query(default=False),
+) -> list[FamilyDiscoveryPublic]:
+    """Ask every configured provider which models its key can reach.
+
+    Admin-only because it spends the stored credentials to make outbound calls
+    on the caller's behalf, and because the answer names every model the
+    account has access to.
+
+    A family with no key is returned as `configured: false` with an empty list
+    rather than omitted -- the UI shows it as a provider awaiting a key, which
+    is the state an operator most needs to see.
+    """
+    await credential_store.refresh_if_stale(session)
+
+    # Matched on model_key, not id: the same model added under a hand-picked id
+    # is still the same model, and offering it again would create a duplicate
+    # registry entry that fans out to one provider twice.
+    existing = {p.model_key: p.id for p in model_registry.all()}
+
+    discoveries = await model_discovery.discover_all(refresh=refresh)
+    return [
+        FamilyDiscoveryPublic(
+            family=discovery.family,
+            label=discovery.label,
+            configured=discovery.configured,
+            error=discovery.error,
+            models=[
+                DiscoveredModelPublic(
+                    **{
+                        field: getattr(model, field)
+                        for field in (
+                            "family",
+                            "provider_label",
+                            "model_key",
+                            "remote_id",
+                            "display_name",
+                            "cost_per_1k_input",
+                            "cost_per_1k_output",
+                            "max_tokens",
+                            "supports_json_mode",
+                        )
+                    },
+                    in_registry=model.model_key in existing,
+                    registry_id=existing.get(model.model_key),
+                )
+                for model in discovery.models
+            ],
+        )
+        for discovery in discoveries
+    ]
+
+
+# --- bulk import / export --------------------------------------------------
+
+
+@models_router.get("/export")
+async def export_registry(principal: AdminUser) -> Response:
+    """Download the registry as the JSON document that /import accepts.
+
+    Round-trips deliberately: the export is the template for an edit-and-
+    re-upload, so it has to be a valid import payload rather than a report.
+
+    api_key is excluded. An inline credential is the one field that must not
+    leave the server, and an export is the easiest possible way for one to end
+    up in a chat message or a ticket.
+    """
+    registry = model_registry.load()
+    document = {
+        "version": registry.version,
+        "providers": [
+            provider.model_dump(mode="json", exclude={"api_key"})
+            for provider in registry.providers
+        ],
+    }
+    return Response(
+        content=json.dumps(document, indent=2) + "\n",
+        media_type="application/json",
+        headers={
+            "Content-Disposition": 'attachment; filename="models.json"'
+        },
+    )
+
+
+@models_router.post("/import", response_model=RegistryImportResult)
+async def import_registry(
+    payload: RegistryImportRequest, principal: AdminUser
+) -> RegistryImportResult:
+    """Apply a supplied model list to the registry.
+
+    Every api_base in the batch is resolved and checked before anything is
+    written. Doing it up front is what makes a rejected upload a no-op: a
+    single unsafe endpoint in a fifty-model file must not leave the first
+    forty-nine applied.
+    """
+    for provider in payload.providers:
+        if not provider.api_base:
+            continue
+        try:
+            await validate_api_base_async(provider.api_base)
+        except UnsafeEndpointError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{provider.id}: {exc}",
+            ) from exc
+
+    before = {p.id for p in model_registry.all()}
+    added, updated = model_registry.import_providers(
+        payload.providers, replace=payload.mode == "replace"
+    )
+    after = model_registry.all()
+
+    return RegistryImportResult(
+        mode=payload.mode,
+        added=added,
+        updated=updated,
+        removed=sorted(before - {p.id for p in after}),
+        total=len(after),
+        providers=[_to_public(p) for p in after],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Provider credentials
+# ---------------------------------------------------------------------------
+
+
+def _credential_statuses(
+    rows: dict[str, ProviderCredential],
+) -> list[CredentialStatus]:
+    """Per-family credential state, with the value withheld.
+
+    model_count is included because "configured" on its own does not tell an
+    operator whether setting this key would achieve anything -- a key for a
+    family with no registry entries changes nothing they can see.
+    """
+    providers = model_registry.all()
+    undecryptable = credential_store.undecryptable_families()
+
+    statuses: list[CredentialStatus] = []
+    for family in PROVIDER_FAMILIES:
+        row = rows.get(family.name)
+        from_db = credential_store.get(family.name) is not None
+        from_env = bool(
+            (getattr(settings, family.settings_attr, None) or "").strip()
+        )
+        statuses.append(
+            CredentialStatus(
+                family=family.name,
+                label=family.label,
+                env_var=family.env_var,
+                console_url=family.console_url,
+                configured=from_db or from_env,
+                # From the stored row, so it describes the key on record even
+                # when the effective one comes from the environment.
+                last4=row.last4 if row else None,
+                source="database" if from_db else ("environment" if from_env else None),
+                needs_reentry=family.name in undecryptable,
+                updated_at=row.updated_at if row else None,
+                model_count=sum(
+                    1
+                    for p in providers
+                    if p.enabled
+                    and not p.api_key_env
+                    and not p.api_key
+                    and family.matches(p.provider)
+                ),
+            )
+        )
+    return statuses
+
+
+async def _credential_rows(session: AsyncSession) -> dict[str, ProviderCredential]:
+    rows = (await session.execute(select(ProviderCredential))).scalars().all()
+    return {row.family: row for row in rows}
+
+
+@models_router.get("/credentials", response_model=list[CredentialStatus])
+async def list_credentials(
+    principal: AdminUser, session: SessionDep
+) -> list[CredentialStatus]:
+    await credential_store.refresh(session)
+    return _credential_statuses(await _credential_rows(session))
+
+
+@models_router.put("/credentials/{family}", response_model=CredentialStatus)
+async def set_credential(
+    family: str,
+    payload: CredentialWrite,
+    principal: AdminUser,
+    session: SessionDep,
+) -> CredentialStatus:
+    """Store a provider key. Admin only; the value is never readable again."""
+    if family not in FAMILIES_BY_NAME:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown provider family: {family}",
+        )
+
+    try:
+        await credential_store.set(
+            session, family, payload.api_key, updated_by=principal.user_id
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    # The cached listing was produced with the old key -- or with none -- so it
+    # would answer the next catalogue request with a stale "not configured".
+    model_discovery.invalidate(family)
+
+    logger.info(
+        "provider_credential_set",
+        extra={"family": family, "by": str(principal.user_id)},
+    )
+    await session.flush()
+    return next(
+        s
+        for s in _credential_statuses(await _credential_rows(session))
+        if s.family == family
+    )
+
+
+@models_router.delete(
+    "/credentials/{family}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def clear_credential(
+    family: str, principal: AdminUser, session: SessionDep
+) -> Response:
+    if family not in FAMILIES_BY_NAME:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown provider family: {family}",
+        )
+    await credential_store.clear(session, family)
+    model_discovery.invalidate(family)
+    logger.info(
+        "provider_credential_deleted",
+        extra={"family": family, "by": str(principal.user_id)},
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@models_router.post(
+    "/credentials/{family}/test", response_model=CredentialTestResult
+)
+async def test_credential(
+    family: str, principal: AdminUser, session: SessionDep
+) -> CredentialTestResult:
+    """Prove a key against the provider instead of assuming it is present.
+
+    The check calls the provider's *listing* endpoint, so it settles whether
+    the key is accepted and what it can reach, and the provider's own wording
+    comes back on failure -- "rejected" and "out of quota" need opposite fixes
+    and must not collapse into one message.
+
+    Listing does not consume completion quota, so a pass does not promise the
+    account can afford a run; the success message says so rather than implying
+    a guarantee it cannot make. Spending a real completion to find out would
+    charge the operator for a diagnostic.
+    """
+    if family not in FAMILIES_BY_NAME:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown provider family: {family}",
+        )
+
+    await credential_store.refresh(session)
+    discovery = next(
+        d
+        for d in await model_discovery.discover_all(refresh=True)
+        if d.family == family
+    )
+
+    if not discovery.configured:
+        return CredentialTestResult(
+            family=family, ok=False, detail="no key is configured"
+        )
+    if discovery.error:
+        return CredentialTestResult(family=family, ok=False, detail=discovery.error)
+    return CredentialTestResult(
+        family=family,
+        ok=True,
+        detail=(
+            f"key is valid — {len(discovery.models)} chat models reachable "
+            "(does not check remaining quota)"
+        ),
+        model_count=len(discovery.models),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -202,3 +202,33 @@ class ExecutionLog(SQLModel, table=True):
     created_at: datetime = Field(
         default_factory=_utcnow, sa_column=_tz_column(index=True)
     )
+
+
+class ProviderCredential(SQLModel, table=True):
+    """A provider API key entered through the admin UI.
+
+    Keyed by provider *family* ("openai", "anthropic", ...) rather than by
+    registry entry, because that is the granularity a key actually has: one
+    OPENAI_API_KEY authenticates every OpenAI model in the registry. A single
+    entry needing its own key still uses ProviderConfig.api_key_env.
+
+    The value is stored encrypted (app.core.crypto) and is never read back out
+    over the API -- only `last4`, which is enough to confirm *which* key is in
+    place without disclosing it.
+    """
+
+    __tablename__ = "provider_credentials"
+
+    family: str = Field(primary_key=True, max_length=64)
+    encrypted_key: str = Field(sa_column=Column(Text, nullable=False))
+    # Denormalised so the UI can show which key is stored without decrypting
+    # on every list request -- and so it still shows something useful when the
+    # encryption key has rotated and the ciphertext is no longer readable.
+    last4: str = Field(default="", max_length=8)
+    updated_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
+    # Audit only, and deliberately NOT a foreign key. It records who last
+    # touched the key; it must never be the reason saving one fails. A
+    # constraint here would turn a deleted or unrecognised admin id into an
+    # integrity error on the one operation an operator performs to *recover*
+    # access to their providers.
+    updated_by: Optional[uuid.UUID] = Field(default=None)

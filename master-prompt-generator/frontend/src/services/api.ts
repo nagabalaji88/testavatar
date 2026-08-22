@@ -3,10 +3,15 @@
 import type {
   Candidate,
   ConsensusPrompt,
+  CredentialStatus,
+  CredentialTestResult,
   CurrentUser,
   ExecutionLogEntry,
+  FamilyDiscovery,
   MetricDefinition,
+  ModelWritePayload,
   ProviderConfig,
+  RegistryImportResult,
   RunAccepted,
   RunCreatePayload,
   RunDetail,
@@ -176,11 +181,52 @@ export const api = {
       body: JSON.stringify({ enabled }),
     }),
 
-  upsertModel: (payload: ProviderConfig): Promise<ProviderConfig> =>
+  upsertModel: (payload: ModelWritePayload): Promise<ProviderConfig> =>
     request<ProviderConfig>('/models', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  deleteModel: (id: string): Promise<void> =>
+    request<void>(`/models/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  /** Ask every configured provider which models its key can reach. */
+  modelCatalog: (refresh = false): Promise<FamilyDiscovery[]> =>
+    request<FamilyDiscovery[]>(`/models/catalog${refresh ? '?refresh=true' : ''}`),
+
+  importModels: (
+    providers: ModelWritePayload[],
+    mode: 'merge' | 'replace',
+  ): Promise<RegistryImportResult> =>
+    request<RegistryImportResult>('/models/import', {
+      method: 'POST',
+      body: JSON.stringify({ providers, mode }),
+    }),
+
+  /** The registry as the JSON document /import accepts, for edit-and-reupload. */
+  exportModels: (): Promise<string> => request<string>('/models/export'),
+
+  listCredentials: (): Promise<CredentialStatus[]> =>
+    request<CredentialStatus[]>('/models/credentials'),
+
+  setCredential: (family: string, apiKey: string): Promise<CredentialStatus> =>
+    request<CredentialStatus>(`/models/credentials/${encodeURIComponent(family)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ api_key: apiKey }),
+    }),
+
+  clearCredential: (family: string): Promise<void> =>
+    request<void>(`/models/credentials/${encodeURIComponent(family)}`, {
+      method: 'DELETE',
+    }),
+
+  /** Prove a key against the provider. Presence is not usability: a current
+   *  key can still answer 429 because the account is out of quota. */
+  testCredential: (family: string): Promise<CredentialTestResult> =>
+    request<CredentialTestResult>(
+      `/models/credentials/${encodeURIComponent(family)}/test`,
+      { method: 'POST' },
+    ),
 
   metricDefinitions: (): Promise<MetricDefinition[]> =>
     request<MetricDefinition[]>('/metrics-definitions'),

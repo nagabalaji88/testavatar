@@ -287,6 +287,13 @@ class ProviderPublic(BaseModel):
     # Served from your own hardware, so no credential applies at all. This is
     # not the same as "credential missing" and should not read as a problem.
     is_local_runtime: bool = False
+    # Which credential family would fix this entry, so the UI can link a
+    # keyless model straight to the field that supplies it.
+    credential_family: Optional[str] = None
+    # Which source answered: entry_env | entry_inline | database | environment.
+    # "The key is set" stops being actionable once there are two places it can
+    # come from -- an operator editing the wrong one sees no effect.
+    credential_source: Optional[str] = None
 
 
 class ProviderRegistryConfig(BaseModel):
@@ -306,6 +313,133 @@ class ProviderRegistryConfig(BaseModel):
 
 class ProviderToggle(BaseModel):
     enabled: bool
+
+
+# ---------------------------------------------------------------------------
+# Provider credentials
+# ---------------------------------------------------------------------------
+
+
+class CredentialStatus(BaseModel):
+    """What is known about one family's key, minus the key.
+
+    Deliberately has no field that could carry the value. `last4` is the whole
+    of what is disclosed, and it exists because "configured: true" does not
+    answer the question an operator actually has -- whether the key in place is
+    the one they think it is.
+    """
+
+    family: str
+    label: str
+    env_var: str
+    console_url: Optional[str] = None
+    configured: bool = False
+    last4: Optional[str] = None
+    # database | environment -- which source is currently winning. The database
+    # takes precedence, so an operator who sets a key here can see that it is
+    # now the effective one even though the old variable is still exported.
+    source: Optional[str] = None
+    # True when a stored row exists but the encryption key can no longer read
+    # it, which needs a re-entry rather than looking like an absent key.
+    needs_reentry: bool = False
+    updated_at: Optional[datetime] = None
+    # How many enabled registry entries this key unblocks, so the UI can say
+    # what setting it would actually achieve.
+    model_count: int = 0
+
+
+class CredentialWrite(BaseModel):
+    api_key: str = Field(min_length=8, max_length=512)
+
+    @field_validator("api_key")
+    @classmethod
+    def _trimmed_and_present(cls, value: str) -> str:
+        # Copy-paste from a provider console routinely brings whitespace or a
+        # newline along; sent verbatim these produce a malformed auth header
+        # and a 401 that reads as a wrong key.
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("api_key must not be blank")
+        return trimmed
+
+
+class CredentialTestResult(BaseModel):
+    """Outcome of proving a key against the provider before relying on it."""
+
+    family: str
+    ok: bool
+    detail: str
+    model_count: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Live model discovery
+# ---------------------------------------------------------------------------
+
+
+class DiscoveredModelPublic(BaseModel):
+    family: str
+    provider_label: str
+    model_key: str
+    remote_id: str
+    display_name: str
+    cost_per_1k_input: Optional[float] = None
+    cost_per_1k_output: Optional[float] = None
+    max_tokens: Optional[int] = None
+    supports_json_mode: bool = True
+    # Set by the API, not the provider: whether this model is already a
+    # registry entry, so the picker can show it as added instead of offering a
+    # duplicate.
+    in_registry: bool = False
+    registry_id: Optional[str] = None
+
+
+class FamilyDiscoveryPublic(BaseModel):
+    family: str
+    label: str
+    configured: bool
+    models: list[DiscoveredModelPublic] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Registry import / export
+# ---------------------------------------------------------------------------
+
+
+class RegistryImportRequest(BaseModel):
+    """A supplied model list, replacing or merging into the registry.
+
+    Accepts either a full registry document or a bare provider array; the
+    endpoint normalises both, because a file exported from this app and a list
+    someone hand-wrote are both things an operator will reasonably upload.
+    """
+
+    providers: list[ProviderConfig] = Field(min_length=1)
+    version: str = "1.0"
+    # Merge by default: replace silently discards working models that the
+    # uploaded file happens not to mention, which is a destructive default for
+    # a file picker.
+    mode: Literal["merge", "replace"] = "merge"
+
+    @field_validator("providers")
+    @classmethod
+    def _unique_ids(cls, value: list[ProviderConfig]) -> list[ProviderConfig]:
+        seen: set[str] = set()
+        for provider in value:
+            if provider.id in seen:
+                raise ValueError(f"Duplicate provider id in upload: {provider.id}")
+            seen.add(provider.id)
+        return value
+
+
+class RegistryImportResult(BaseModel):
+    mode: str
+    added: list[str] = Field(default_factory=list)
+    updated: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    total: int = 0
+    providers: list["ProviderPublic"] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

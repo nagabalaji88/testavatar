@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Awaitable, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -20,7 +20,8 @@ from app.core.config import settings
 from app.core.events import event_bus
 from app.core.logging import configure_logging, get_logger, request_id_ctx
 from app.core.telemetry import configure_telemetry
-from app.db.session import dispose_database, init_database
+from app.db.session import dispose_database, init_database, session_scope
+from app.services.credential_store import credential_store
 from app.services.model_registry import model_registry
 from app.services.vector_service import vector_service
 
@@ -39,10 +40,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     await init_database()
     model_registry.load()
+    # Before anything reports on provider availability. The credential store is
+    # read synchronously from the LLM path, so the snapshot has to exist by the
+    # time the first request lands.
+    async with session_scope() as session:
+        await credential_store.refresh(session)
     await vector_service.ensure_collection()
     logger.info(
         "startup_complete",
-        extra={"enabled_providers": [p.id for p in model_registry.enabled()]},
+        extra={
+            "enabled_providers": [p.id for p in model_registry.enabled()],
+            "stored_credentials": sorted(credential_store.configured_families()),
+        },
     )
     try:
         yield
@@ -132,6 +141,32 @@ async def http_exception_handler(
     )
 
 
+def _serialisable_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
+    """Pydantic's error list, with the parts json.dumps refuses removed.
+
+    A validator that raises ValueError -- which is how every custom check in
+    schemas.py rejects input -- puts the exception *object* in the error's
+    `ctx`. json.dumps cannot encode it, so building the 422 body raised
+    TypeError inside the handler and the client got a bare 500 with no
+    indication of what was wrong. That made the api_base SSRF rejection, in
+    particular, indistinguishable from a server fault.
+
+    `msg` already carries the validator's message, so ctx is stringified rather
+    than preserved: it exists to explain the failure, not to be machine-read.
+    """
+    cleaned: list[dict[str, Any]] = []
+    for error in exc.errors():
+        entry = {k: v for k, v in error.items() if k != "ctx"}
+        # loc is a tuple and may contain ints for list indices; both encode
+        # fine, but make it a list so the shape is stable JSON.
+        if "loc" in entry:
+            entry["loc"] = list(entry["loc"])
+        if ctx := error.get("ctx"):
+            entry["ctx"] = {key: str(value) for key, value in ctx.items()}
+        cleaned.append(entry)
+    return cleaned
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
@@ -140,7 +175,7 @@ async def validation_exception_handler(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
             "detail": "Request validation failed",
-            "errors": exc.errors(),
+            "errors": _serialisable_errors(exc),
             "request_id": request_id_ctx.get(),
         },
     )

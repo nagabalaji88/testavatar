@@ -52,6 +52,7 @@ from app.models.schemas import (
     RequirementAnalysis,
     RunCreate,
 )
+from app.services.credential_store import credential_store
 from app.services.llm_service import LLMFailure, LLMResult, llm_service
 from app.services.model_registry import UnknownProviderError, model_registry
 from app.services.vector_service import vector_service
@@ -677,6 +678,17 @@ async def execute_pipeline(run_id: str, request: RunCreate, provider_ids: list[s
     """Run the full pipeline for a persisted run, recording terminal failures."""
     run_id_ctx.set(run_id)
     RUNS_IN_FLIGHT.inc()
+
+    # This is a Celery worker, a different process from the API that accepted
+    # the run. Its credential snapshot and its registry cache were both built
+    # at worker start, so without this a key or a model added through the UI
+    # would not exist here -- the run would fail on a model the launcher had
+    # just offered as selectable. Once per run is enough: a run's provider set
+    # is fixed at this point.
+    async with session_scope() as session:
+        await credential_store.refresh(session)
+    model_registry.load()
+
     await event_bus.emit(run_id, EventType.RUN_STARTED, title=request.title)
 
     initial: PipelineState = {

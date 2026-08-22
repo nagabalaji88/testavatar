@@ -345,11 +345,26 @@ class TestCredentialStateIsReportedToTheUi:
 
     def test_every_family_the_resolver_reads_can_also_be_named(self) -> None:
         """A family missing from the name map would report an unsettable key."""
-        from app.services.llm_service import PROVIDER_KEY_ENV_VARS
+        from app.core.provider_families import PROVIDER_FAMILIES
 
-        for family in PROVIDER_KEY_ENV_VARS:
-            pub = self._public(_provider(id=family, provider=family))
-            assert pub.credential_env_var, f"{family} reports no variable to set"
+        for family in PROVIDER_FAMILIES:
+            pub = self._public(_provider(id=family.name, provider=family.name))
+            assert pub.credential_env_var, f"{family.name} reports no variable to set"
+
+    def test_every_alias_resolves_to_the_same_family_as_its_name(self) -> None:
+        """An alias that missed the table would read as an unknown provider.
+
+        `provider` is free text in models.json, so "Gemini" and "google" both
+        occur in the wild and must reach the same credential.
+        """
+        from app.core.provider_families import PROVIDER_FAMILIES
+
+        for family in PROVIDER_FAMILIES:
+            for alias in family.aliases:
+                pub = self._public(_provider(id=alias, provider=alias))
+                assert pub.credential_env_var == family.env_var, (
+                    f"alias {alias!r} does not resolve to {family.name}"
+                )
 
     def test_the_listing_still_withholds_the_key_itself(self) -> None:
         """Reporting availability must not become a way to read the value."""

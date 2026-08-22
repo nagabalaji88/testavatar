@@ -109,6 +109,12 @@ class Settings(BaseSettings):
     ]
 
     # --- Provider credentials --------------------------------------------
+    # Encrypts credentials entered through the admin UI before they are stored.
+    # Left unset, one is derived from jwt_secret_key so a fresh deployment
+    # works with no extra configuration -- see app.core.crypto for why that is
+    # a convenience rather than the recommendation.
+    credential_encryption_key: Optional[str] = None
+
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None

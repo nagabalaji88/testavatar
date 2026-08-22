@@ -44,8 +44,14 @@ from litellm.exceptions import (
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.pinned_transport import build_pinned_client
+from app.core.provider_families import (
+    ProviderFamily,
+    family_for,
+    is_local_provider,
+)
 from app.core.telemetry import LLM_CALLS, LLM_COST, LLM_LATENCY, LLM_TOKENS, span
 from app.models.schemas import ProviderConfig
+from app.services.credential_store import credential_store
 
 logger = get_logger(__name__)
 
@@ -125,17 +131,23 @@ class LLMFailure:
     latency_ms: int
 
 
-# Runtimes that serve open-weight models from your own hardware. They take no
-# credential, so a missing key must not be treated as a misconfiguration.
-LOCAL_PROVIDERS = frozenset({"ollama", "vllm", "llamacpp", "llama.cpp", "local", "lmstudio"})
+def _settings_key_for(family: ProviderFamily) -> Optional[str]:
+    value = getattr(settings, family.settings_attr, None)
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _api_key_for(provider: ProviderConfig) -> Optional[str]:
     """Resolve a provider's credential, most specific source first.
 
-    A per-entry key beats the per-provider-family key from settings, so two
-    registry entries pointing at the same family (a shared gateway and a
-    dedicated deployment, say) can authenticate independently.
+    A per-entry key beats anything per-family, so two registry entries pointing
+    at the same family (a shared gateway and a dedicated deployment, say) can
+    authenticate independently.
+
+    Between the two per-family sources, the database wins over the environment.
+    That ordering is the point of storing them at all: a key an admin has just
+    typed into the UI has to take effect, and if a stale environment variable
+    outranked it the edit would silently do nothing. Which source answered is
+    reported by credential_source() so the precedence is never a guess.
     """
     if provider.api_key_env:
         # An empty or unset variable is a missing credential, not the empty
@@ -151,35 +163,13 @@ def _api_key_for(provider: ProviderConfig) -> Optional[str]:
         return None
     if provider.api_key:
         return provider.api_key
-    mapping = {
-        "openai": settings.openai_api_key,
-        "anthropic": settings.anthropic_api_key,
-        "google": settings.gemini_api_key,
-        "gemini": settings.gemini_api_key,
-        "groq": settings.groq_api_key,
-        "openrouter": settings.openrouter_api_key,
-        "together": settings.together_api_key,
-        "togetherai": settings.together_api_key,
-        "huggingface": settings.huggingface_api_key,
-    }
-    return mapping.get(provider.provider.strip().lower())
 
-
-# The variable each provider family reads, so the UI can name the one to set
-# rather than just reporting that something is missing. Kept beside the mapping
-# above because the two have to agree: a family here that is absent there would
-# tell an operator to set a variable nothing reads.
-PROVIDER_KEY_ENV_VARS: dict[str, str] = {
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "google": "GEMINI_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
-    "together": "TOGETHER_API_KEY",
-    "togetherai": "TOGETHER_API_KEY",
-    "huggingface": "HUGGINGFACE_API_KEY",
-}
+    family = family_for(provider.provider)
+    if family is None:
+        return None
+    if stored := credential_store.get(family.name):
+        return stored
+    return _settings_key_for(family)
 
 
 def credential_env_var(provider: ProviderConfig) -> Optional[str]:
@@ -192,7 +182,41 @@ def credential_env_var(provider: ProviderConfig) -> Optional[str]:
         return provider.api_key_env
     if provider.api_key:
         return None
-    return PROVIDER_KEY_ENV_VARS.get(provider.provider.strip().lower())
+    family = family_for(provider.provider)
+    return family.env_var if family else None
+
+
+def credential_family(provider: ProviderConfig) -> Optional[str]:
+    """The credential family this entry authenticates against, if any.
+
+    Lets the UI point a keyless model at the one field that would fix it,
+    instead of asking the operator to work out which family it belongs to.
+    """
+    if provider.api_key_env or provider.api_key:
+        return None
+    family = family_for(provider.provider)
+    return family.name if family else None
+
+
+def credential_source(provider: ProviderConfig) -> Optional[str]:
+    """Which of the four sources actually supplies this entry's key.
+
+    Mirrors _api_key_for's precedence exactly. Shown in the UI because "the
+    key is set" is not actionable on its own once there are two places it could
+    have come from: an operator editing the wrong one sees no effect and has no
+    way to tell why.
+    """
+    if provider.api_key_env:
+        return "entry_env" if os.environ.get(provider.api_key_env, "").strip() else None
+    if provider.api_key:
+        return "entry_inline"
+
+    family = family_for(provider.provider)
+    if family is None:
+        return None
+    if credential_store.get(family.name):
+        return "database"
+    return "environment" if _settings_key_for(family) else None
 
 
 def is_local_runtime(provider: ProviderConfig) -> bool:
@@ -201,7 +225,7 @@ def is_local_runtime(provider: ProviderConfig) -> bool:
         # A hosted deployment of an open-weight model still reads "Ollama" in
         # `provider`; declaring a credential is what distinguishes it.
         return False
-    return provider.provider.strip().lower() in LOCAL_PROVIDERS
+    return is_local_provider(provider.provider)
 
 
 def _api_base_for(provider: ProviderConfig) -> Optional[str]:
@@ -229,7 +253,7 @@ def requires_credential(provider: ProviderConfig) -> bool:
     # run start against an endpoint that answers 401 on every call.
     if provider.api_key_env or provider.api_key:
         return _api_key_for(provider) is None
-    if provider.provider.strip().lower() in LOCAL_PROVIDERS:
+    if is_local_provider(provider.provider):
         return False
     return _api_key_for(provider) is None
 

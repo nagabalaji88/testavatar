@@ -1,15 +1,14 @@
 import { useMemo, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Rocket, X } from 'lucide-react';
 import type { ProviderConfig, RunAccepted, RunCreatePayload } from '@/types';
 import { GlassCard, SectionHeader } from '@/components/ui/GlassCard';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { inputClass } from '@/components/ui/Field';
 import { api, ApiError } from '@/services/api';
 import { cn } from '@/lib/utils';
-
-const inputClass =
-  'w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2.5 text-[13px] text-white placeholder:text-white/30 outline-none transition focus:border-aurora-400/60 focus:bg-white/[0.07]';
 
 function TagInput({
   label,
@@ -80,7 +79,11 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
   const [outputFormat, setOutputFormat] = useState('markdown');
   const [constraints, setConstraints] = useState<string[]>([]);
   const [requirements, setRequirements] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
+  // null means "untouched", which is what makes every usable model the default
+  // selection. An empty array is a deliberate empty selection and must stay
+  // empty: treating both as "nothing chosen" meant deselecting the last model
+  // silently re-selected all of them.
+  const [selected, setSelected] = useState<string[] | null>(null);
 
   const { data: models = [] } = useQuery<ProviderConfig[]>({
     queryKey: ['models'],
@@ -108,7 +111,14 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
     onSuccess: onLaunched,
   });
 
-  const chosen = selected.length ? selected : usable.map((model) => model.id);
+  const usableIds = useMemo(() => usable.map((model) => model.id), [usable]);
+  // An explicit selection is filtered against what is currently usable: a
+  // model can lose its key, or be disabled or deleted from the models page,
+  // while it still sits in this component's state.
+  const chosen = useMemo(
+    () => (selected === null ? usableIds : selected.filter((id) => usableIds.includes(id))),
+    [selected, usableIds],
+  );
   const valid = title.trim().length >= 3 && businessProblem.trim().length >= 20 && targetDomain.trim().length >= 2;
 
   const submit = (event: FormEvent) => {
@@ -275,9 +285,23 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
             })}
             {!usable.length ? (
               <p className="text-[12px] text-faint">
-                {enabled.length
-                  ? 'No model has a key set. Add one to your .env and restart, or run a local Ollama model — those need no key.'
-                  : 'No providers are enabled — add one in the model registry.'}
+                {enabled.length ? (
+                  <>
+                    No enabled model has a usable key.{' '}
+                    <Link to="/models" className="text-aurora-300 hover:text-aurora-200">
+                      Add one on the models page
+                    </Link>{' '}
+                    — it applies immediately.
+                  </>
+                ) : (
+                  <>
+                    No providers are enabled.{' '}
+                    <Link to="/models" className="text-aurora-300 hover:text-aurora-200">
+                      Add a model
+                    </Link>{' '}
+                    to get started.
+                  </>
+                )}
               </p>
             ) : null}
           </div>
@@ -296,15 +320,20 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
                     <span>{model.name}</span>
                     <span aria-hidden="true">·</span>
                     <span>
-                      set{' '}
+                      needs{' '}
                       <code className="rounded bg-white/8 px-1 py-0.5 font-mono text-[11px] text-dim">
-                        {model.credential_env_var ?? 'its API key'}
-                      </code>{' '}
-                      in .env, then restart
+                        {model.credential_env_var ?? 'an API key'}
+                      </code>
                     </span>
                   </li>
                 ))}
               </ul>
+              <Link
+                to="/models"
+                className="mt-2 inline-block text-[12px] text-aurora-300 transition hover:text-aurora-200"
+              >
+                Set provider keys →
+              </Link>
             </div>
           ) : null}
         </div>
