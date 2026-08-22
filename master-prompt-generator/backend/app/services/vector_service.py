@@ -8,7 +8,7 @@ is logged rather than raised.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 import litellm
 from qdrant_client import AsyncQdrantClient, models as qmodels
@@ -18,6 +18,10 @@ from app.core.logging import get_logger
 from app.models.schemas import SemanticSearchHit
 
 logger = get_logger(__name__)
+
+# Providers cap how many inputs one embedding request may carry; 96 sits under
+# every limit the supported providers impose.
+_EMBED_BATCH = 96
 
 
 def _embedding_request() -> Optional[dict[str, Any]]:
@@ -97,6 +101,43 @@ class VectorService:
         except Exception as exc:
             logger.warning("embedding_failed", extra={"error": str(exc)})
             return None
+
+    async def embed_many(self, texts: Sequence[str]) -> Optional[list[list[float]]]:
+        """Embed a batch in as few round-trips as the provider allows.
+
+        The merge needs a vector for every directive in the fan-out -- a couple
+        of hundred short strings. One call per directive would make the round
+        trips, not the tokens, the dominant cost; batching keeps the whole
+        thing to a handful of requests.
+
+        All-or-nothing on purpose: a partial result would silently leave some
+        directives compared semantically and others lexically, which is harder
+        to reason about than falling back cleanly for the whole run.
+        """
+        request = _embedding_request()
+        if request is None or not texts:
+            return None
+
+        vectors: list[list[float]] = []
+        try:
+            for start in range(0, len(texts), _EMBED_BATCH):
+                chunk = [text[:8000] for text in texts[start : start + _EMBED_BATCH]]
+                response = await litellm.aembedding(input=chunk, **request)
+                # Providers are not required to preserve input order, and the
+                # caller keys results positionally, so sort by the index the
+                # response carries rather than trusting arrival order.
+                ordered = sorted(response["data"], key=lambda item: item["index"])
+                if len(ordered) != len(chunk):
+                    logger.warning(
+                        "embedding_batch_incomplete",
+                        extra={"expected": len(chunk), "received": len(ordered)},
+                    )
+                    return None
+                vectors.extend(list(item["embedding"]) for item in ordered)
+        except Exception as exc:
+            logger.warning("embedding_batch_failed", extra={"error": str(exc)})
+            return None
+        return vectors
 
     async def index_prompt(
         self,

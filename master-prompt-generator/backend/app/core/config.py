@@ -151,6 +151,16 @@ class Settings(BaseSettings):
     # repair round-trip, which is more expensive than the tokens saved.
     analysis_max_tokens: int = 1536
     judge_max_tokens: int = 1536
+
+    # Compare directives by meaning rather than shared words when merging.
+    # The lexical measure scores one rule written two ways at ~0.18, so the
+    # merge ships both and records each as uncorroborated -- discarding the
+    # agreement a fan-out exists to find. Embedding every directive costs a
+    # fraction of a cent per run against the generation calls that produced
+    # them, but it adds a dependency on the embedding provider, so it is opt-in
+    # until measured on your own briefs. Off falls back to the lexical merge
+    # exactly as before; so does any embedding failure.
+    semantic_merge_enabled: bool = False
     judge_model_id: str = "anthropic-claude-sonnet"
     consensus_model_id: str = "anthropic-claude-sonnet"
     analyzer_model_id: str = "openai-gpt4o"
