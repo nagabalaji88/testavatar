@@ -58,6 +58,7 @@ from app.services.llm_service import (
     estimate_tokens,
     llm_service,
 )
+from app.agents.semantic import SemanticIndex, build_semantic_index
 from app.services.model_registry import UnknownProviderError, model_registry
 
 logger = get_logger(__name__)
@@ -131,6 +132,15 @@ STOPWORDS = frozenset(
 # threshold sits in that gap with margin on both sides.
 SIMILARITY_SUBJECT = 0.55
 SIMILARITY_CONFLICT = SIMILARITY_SUBJECT
+
+# Sets whose members are mutually exclusive: naming two of them in otherwise
+# near-identical directives is a disagreement, not a restatement. Only
+# genuinely exclusive vocabularies belong here -- "json" and "schema" would be
+# a false positive, since a directive can reasonably require both.
+EXCLUSIVE_VOCABULARIES: dict[str, frozenset[str]] = {
+    "output formats": frozenset({"json", "yaml", "xml", "csv", "markdown", "toml"}),
+    "reasoning strategies": frozenset({"direct", "chain", "tree", "scratchpad"}),
+}
 
 # Near-verbatim restatement. Used for cheap exact-ish dedupe, not for deciding
 # whether two directives express the same rule -- an earlier version clustered
@@ -398,7 +408,7 @@ def _normalized_tokens(text: str) -> set[str]:
     return {word for word in words if word not in STOPWORDS and len(word) > 2}
 
 
-def similarity(left: str, right: str) -> float:
+def lexical_similarity(left: str, right: str) -> float:
     """Blend lexical overlap with sequence similarity for robust dedupe."""
     left_tokens, right_tokens = _normalized_tokens(left), _normalized_tokens(right)
     if not left_tokens or not right_tokens:
@@ -406,6 +416,31 @@ def similarity(left: str, right: str) -> float:
     jaccard = len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
     ratio = SequenceMatcher(None, left.lower(), right.lower()).ratio()
     return round(0.6 * jaccard + 0.4 * ratio, 4)
+
+
+def similarity(
+    left: str, right: str, index: Optional["SemanticIndex"] = None
+) -> float:
+    """How alike two directives are, by meaning when that is available.
+
+    The lexical score cannot see past wording: two models expressing one rule
+    in different words score near zero, so the merge ships both and records
+    each as uncorroborated -- discarding the agreement that is the whole point
+    of running a fan-out. An embedding scores the pair on meaning instead.
+
+    The two are blended rather than switched between. A high lexical score is
+    strong evidence on its own -- near-identical strings really are the same
+    directive -- so the maximum is taken: semantics can only ever *raise* a
+    pair's score, never pull apart a pair the lexical measure already matched.
+    Without an index this is exactly the previous behaviour.
+    """
+    lexical = lexical_similarity(left, right)
+    if index is None:
+        return lexical
+    semantic = index.similarity(left, right)
+    if semantic is None:
+        return lexical
+    return round(max(lexical, semantic), 4)
 
 
 def score_section(canonical: str, body: str, verdict: JudgeVerdict, weight: float) -> float:
@@ -483,7 +518,9 @@ class ConflictOutcome:
         self.losing_units |= other.losing_units
 
 
-def _contradiction(left: str, right: str) -> Optional[tuple[str, float]]:
+def _contradiction(
+    left: str, right: str, semantic: Optional[SemanticIndex] = None
+) -> Optional[tuple[str, float]]:
     """Classify a pair of directives as contradictory, or return None.
 
     Two directives conflict when they address the same subject *and* either
@@ -495,7 +532,7 @@ def _contradiction(left: str, right: str) -> Optional[tuple[str, float]]:
     therefore run before the duplicate threshold is applied, and only pairs that
     survive both are dismissed as restatements.
     """
-    score = similarity(left, right)
+    score = similarity(left, right, semantic)
     if score < SIMILARITY_CONFLICT:
         return None
 
@@ -506,6 +543,19 @@ def _contradiction(left: str, right: str) -> Optional[tuple[str, float]]:
     numbers_right = set(NUMBER_RE.findall(right))
     if numbers_left and numbers_right and numbers_left != numbers_right:
         return "conflicting numeric limits", score
+
+    # Same shape as the numeric case, for values that are named rather than
+    # counted. "Return strict JSON" and "return strict YAML" differ by one
+    # word, so they score as near-duplicates and one would be dropped as a
+    # restatement -- silently discarding a real disagreement about the output
+    # contract. Semantic similarity makes this *worse*, not better: JSON and
+    # YAML are closely related concepts, so an embedding rates the pair even
+    # more alike. It has to be caught by name.
+    for label, vocabulary in EXCLUSIVE_VOCABULARIES.items():
+        chosen_left = vocabulary & _normalized_tokens(left)
+        chosen_right = vocabulary & _normalized_tokens(right)
+        if chosen_left and chosen_right and chosen_left != chosen_right:
+            return f"conflicting {label}", score
 
     return None
 
@@ -544,7 +594,9 @@ def _semantic_record(
 
 
 def detect_conflicts(
-    canonical: str, variants: Sequence[SectionVariant]
+    canonical: str,
+    variants: Sequence[SectionVariant],
+    semantic: Optional[SemanticIndex] = None,
 ) -> ConflictOutcome:
     """Find syntactic, structural and semantic disagreements within one section."""
     outcome = ConflictOutcome()
@@ -621,7 +673,7 @@ def detect_conflicts(
         for other in variants[index + 1 :]:
             for unit in variant.units:
                 for other_unit in other.units:
-                    verdict = _contradiction(unit, other_unit)
+                    verdict = _contradiction(unit, other_unit, semantic)
                     if verdict is None:
                         continue
                     reason, score = verdict
@@ -643,6 +695,7 @@ def detect_conflicts(
 
 def detect_cross_section_conflicts(
     index: dict[str, list[SectionVariant]],
+    semantic: Optional[SemanticIndex] = None,
 ) -> ConflictOutcome:
     """Find contradictions between directives models filed under different sections.
 
@@ -679,7 +732,7 @@ def detect_cross_section_conflicts(
                 continue
             seen_pairs.add(key)
 
-            verdict = _contradiction(unit, other_unit)
+            verdict = _contradiction(unit, other_unit, semantic)
             if verdict is None:
                 continue
             reason, score = verdict
@@ -700,17 +753,18 @@ def detect_cross_section_conflicts(
 
 def resolve_conflicts(
     index: dict[str, list[SectionVariant]],
+    semantic: Optional[SemanticIndex] = None,
 ) -> tuple[dict[str, list[ConflictRecord]], set[str]]:
     """Phase 2 — run both detection passes and collect the losing directives."""
     per_section: dict[str, list[ConflictRecord]] = {}
     losers: set[str] = set()
 
     for canonical, variants in index.items():
-        outcome = detect_conflicts(canonical, variants)
+        outcome = detect_conflicts(canonical, variants, semantic)
         per_section[canonical] = outcome.records
         losers |= outcome.losing_units
 
-    cross = detect_cross_section_conflicts(index)
+    cross = detect_cross_section_conflicts(index, semantic)
     for record in cross.records:
         canonical = next(
             (key for key, title in CANONICAL_TITLES.items() if title == record.section),
@@ -785,7 +839,9 @@ def score_directive(text: str) -> float:
 
 
 def cluster_directives(
-    variants: Sequence[SectionVariant], losers: set[str]
+    variants: Sequence[SectionVariant],
+    losers: set[str],
+    semantic: Optional[SemanticIndex] = None,
 ) -> list[DirectiveCluster]:
     """Group equivalent directives across models into consensus clusters.
 
@@ -822,7 +878,10 @@ def cluster_directives(
             for cluster in clusters:
                 if cluster.is_code != is_code:
                     continue
-                if similarity(stripped, cluster.representative.text) >= SIMILARITY_SUBJECT:
+                if (
+                    similarity(stripped, cluster.representative.text, semantic)
+                    >= SIMILARITY_SUBJECT
+                ):
                     cluster.members.append(directive)
                     placed = True
                     break
@@ -870,6 +929,7 @@ def merge_section(
     variants: Sequence[SectionVariant],
     losers: Optional[set[str]] = None,
     conflicts: Optional[Sequence[ConflictRecord]] = None,
+    semantic: Optional[SemanticIndex] = None,
 ) -> Optional[MergedSection]:
     """Build a section directive by directive, taking the best phrasing of each."""
     live = [variant for variant in variants if not variant.is_empty]
@@ -877,11 +937,11 @@ def merge_section(
         return None
 
     if losers is None or conflicts is None:
-        outcome = detect_conflicts(canonical, live)
+        outcome = detect_conflicts(canonical, live, semantic)
         conflicts = outcome.records
         losers = outcome.losing_units
 
-    clusters = cluster_directives(live, losers)
+    clusters = cluster_directives(live, losers, semantic)
     selected = select_directives(clusters)
 
     if not selected:
@@ -1316,14 +1376,23 @@ class ConsensusEngine:
         self._llm = service or llm_service
 
     def synthesize_deterministic(
-        self, candidates: Sequence[CandidateInput], analysis: Optional[RequirementAnalysis] = None
+        self,
+        candidates: Sequence[CandidateInput],
+        analysis: Optional[RequirementAnalysis] = None,
+        semantic: Optional[SemanticIndex] = None,
     ) -> DeterministicMerge:
-        """Phases 1-3b: produce the merged prompt without any model involvement."""
+        """Phases 1-3b: produce the merged prompt without any model involvement.
+
+        `semantic` is an optional precomputed embedding lookup. It changes how
+        alike two directives are judged to be, never what is done about it, and
+        the function stays pure: same candidates and same index give the same
+        merge, so a test can pass a hand-built index and assert exact clusters.
+        """
         if not candidates:
             raise ValueError("Consensus requires at least one scored candidate")
 
         index = extract_variants(candidates)
-        conflicts_by_section, losing_units = resolve_conflicts(index)
+        conflicts_by_section, losing_units = resolve_conflicts(index, semantic)
 
         ordering = list(CANONICAL_ORDER)
         if analysis and analysis.required_sections:
@@ -1340,6 +1409,7 @@ class ConsensusEngine:
                 variants,
                 losing_units,
                 conflicts_by_section.get(canonical, []),
+                semantic,
             )
             if merged is not None:
                 merged_sections.append(merged)
@@ -1385,7 +1455,24 @@ class ConsensusEngine:
         *,
         polish: bool = True,
     ) -> ConsensusResult:
-        deterministic = self.synthesize_deterministic(candidates, analysis)
+        semantic: Optional[SemanticIndex] = None
+        if settings.semantic_merge_enabled:
+            # One batched embedding call for every directive in the fan-out,
+            # before the merge starts. A few hundred short strings against a
+            # small embedding model costs a fraction of a cent -- far below the
+            # generation calls that produced them -- and buys the merge the
+            # ability to see that two models wrote the same rule in different
+            # words. Failure here returns an empty index, not an error: the
+            # merge then behaves exactly as it did before.
+            semantic = await build_semantic_index(
+                [
+                    unit
+                    for candidate in candidates
+                    for unit in split_units(candidate.content)
+                ]
+            )
+
+        deterministic = self.synthesize_deterministic(candidates, analysis, semantic)
         merged = deterministic.document
         provenance = deterministic.provenance
         conflicts = deterministic.conflicts
