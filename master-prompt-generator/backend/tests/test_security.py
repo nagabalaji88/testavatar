@@ -155,8 +155,15 @@ class TestDeploymentGuards:
         assert Settings(environment="local").jwt_secret_key
 
     def test_production_refuses_the_default_secret(self) -> None:
+        # Passed explicitly rather than relying on the variable being unset:
+        # conftest sets a JWT_SECRET_KEY for the suite, so an omitted argument
+        # picks that up and exercises a different guard than the one named
+        # here. Stating the input is also what the rest of these tests do.
         with pytest.raises(ValidationError) as exc:
-            Settings(environment="production")
+            Settings(
+                environment="production",
+                jwt_secret_key=Settings.DEFAULT_JWT_SECRET,
+            )
         assert "JWT_SECRET_KEY" in str(exc.value)
 
     def test_production_refuses_a_short_secret(self) -> None:
