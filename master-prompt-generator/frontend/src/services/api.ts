@@ -4,6 +4,7 @@ import type {
   Candidate,
   ConsensusPrompt,
   CurrentUser,
+  DebateResult,
   ExecutionLogEntry,
   MetricDefinition,
   ProviderConfig,
@@ -163,6 +164,13 @@ export const api = {
 
   metricDefinitions: (): Promise<MetricDefinition[]> =>
     request<MetricDefinition[]>('/metrics-definitions'),
+
+  /** Runs the full three-round debate. Long-lived: the server answers when it is done. */
+  debate: (question: string, providerIds?: string[]): Promise<DebateResult> =>
+    request<DebateResult>('/debate', {
+      method: 'POST',
+      body: JSON.stringify({ question, provider_ids: providerIds ?? null }),
+    }),
 
   createRun: (payload: RunCreatePayload): Promise<RunAccepted> =>
     request<RunAccepted>('/runs', { method: 'POST', body: JSON.stringify(payload) }),

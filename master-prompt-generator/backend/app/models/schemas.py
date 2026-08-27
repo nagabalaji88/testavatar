@@ -434,3 +434,50 @@ class HealthReport(BaseModel):
     version: str
     environment: str
     dependencies: dict[str, str]
+
+
+# ---------------------------------------------------------------------------
+# Debate
+# ---------------------------------------------------------------------------
+
+
+class DebateRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=20_000)
+    provider_ids: list[str] | None = None
+
+
+class DebateContribution(BaseModel):
+    model_id: str
+    model_name: str
+    provider: str
+    label: str
+    content: str
+    latency_ms: int
+    cost_usd: float
+
+
+class DebateFailure(BaseModel):
+    model_id: str
+    model_name: str
+    error: str
+
+
+class DebateRoundRead(BaseModel):
+    stage: str
+    title: str
+    contributions: list[DebateContribution]
+    failures: list[DebateFailure]
+
+
+class DebateRead(BaseModel):
+    question: str
+    final_answer: str
+    judge_model_id: str
+    judge_model_name: str
+    judge_fell_back: bool
+    solo_mode: bool
+    elapsed_ms: int
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+    rounds: list[DebateRoundRead]

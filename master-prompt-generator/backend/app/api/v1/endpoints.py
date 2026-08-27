@@ -23,6 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.agents.debate import DebateError, debate_engine, debate_to_read
 from app.core.config import settings
 from app.core.events import EventType, event_bus
 from app.core.logging import get_logger
@@ -44,6 +45,8 @@ from app.models.domain import ConsensusPrompt, ExecutionLog, PromptRun, RunStatu
 from app.models.schemas import (
     METRIC_DEFINITIONS,
     ConsensusRead,
+    DebateRead,
+    DebateRequest,
     ExportRequest,
     HealthReport,
     ProviderConfig,
@@ -68,6 +71,7 @@ logger = get_logger(__name__)
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 runs_router = APIRouter(prefix="/runs", tags=["runs"])
 models_router = APIRouter(prefix="/models", tags=["models"])
+debate_router = APIRouter(prefix="/debate", tags=["debate"])
 system_router = APIRouter(tags=["system"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -464,6 +468,37 @@ async def stream_run(websocket: WebSocket, run_id: uuid.UUID) -> None:
     finally:
         if websocket.client_state.name == "CONNECTED":
             await websocket.close()
+
+
+# ---------------------------------------------------------------------------
+# Debate
+# ---------------------------------------------------------------------------
+
+
+@debate_router.post("", response_model=DebateRead)
+async def run_debate(payload: DebateRequest, principal: CurrentUser) -> DebateRead:
+    """Debate one question across several models and return the judged answer.
+
+    Synchronous on purpose: a debate is three sequential rounds, so the caller
+    holds the connection for the duration. Runs are the surface for work that
+    needs backgrounding, streaming and persistence.
+    """
+    try:
+        providers = model_registry.resolve(payload.provider_ids)
+    except UnknownProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown provider: {exc}",
+        ) from exc
+
+    try:
+        result = await debate_engine.debate(payload.question, providers)
+    except DebateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    return debate_to_read(result)
 
 
 # ---------------------------------------------------------------------------

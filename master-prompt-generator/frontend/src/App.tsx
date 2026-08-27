@@ -10,12 +10,13 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Cpu, LayoutDashboard, LogOut, Sparkles } from 'lucide-react';
+import { Cpu, LayoutDashboard, LogOut, Scale, Sparkles } from 'lucide-react';
 import type { CurrentUser } from '@/types';
 import { api, ApiError, tokenStore } from '@/services/api';
 import { HomePage } from '@/pages/HomePage';
 import { RunPage } from '@/pages/RunPage';
 import { ModelsPage } from '@/pages/ModelsPage';
+import { DebatePage } from '@/pages/DebatePage';
 import { LoginPage } from '@/pages/LoginPage';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
@@ -114,6 +115,7 @@ function Shell({ children }: { children: ReactNode }) {
           </Link>
 
           <NavLink to="/" icon={<LayoutDashboard className="size-4" />} label="Runs" />
+          <NavLink to="/debate" icon={<Scale className="size-4" />} label="Debate" />
           <NavLink to="/models" icon={<Cpu className="size-4" />} label="Models" />
 
           <div className="ml-auto flex items-center gap-3">
@@ -167,6 +169,16 @@ export default function App() {
               <RequireAuth>
                 <Shell>
                   <RunPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/debate"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <DebatePage />
                 </Shell>
               </RequireAuth>
             }

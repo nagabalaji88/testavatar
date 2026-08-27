@@ -240,3 +240,40 @@ export interface CurrentUser {
   is_active: boolean;
   created_at: string;
 }
+
+export interface DebateContribution {
+  model_id: string;
+  model_name: string;
+  provider: string;
+  label: string;
+  content: string;
+  latency_ms: number;
+  cost_usd: number;
+}
+
+export interface DebateFailure {
+  model_id: string;
+  model_name: string;
+  error: string;
+}
+
+export interface DebateRound {
+  stage: 'opening' | 'cross_examination' | 'synthesis';
+  title: string;
+  contributions: DebateContribution[];
+  failures: DebateFailure[];
+}
+
+export interface DebateResult {
+  question: string;
+  final_answer: string;
+  judge_model_id: string;
+  judge_model_name: string;
+  judge_fell_back: boolean;
+  solo_mode: boolean;
+  elapsed_ms: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  rounds: DebateRound[];
+}
