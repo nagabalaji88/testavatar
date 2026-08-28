@@ -170,6 +170,26 @@ if errorlevel 1 (
 ) else (
     echo  [ok]    Generated a random POSTGRES_PASSWORD.
 )
+
+REM The password just written only reaches PostgreSQL if its volume is empty:
+REM POSTGRES_PASSWORD is applied at first initialisation and ignored on every
+REM start after that. So a volume left over from an earlier install still
+REM expects the password that install used, which .env no longer holds. Say so
+REM here, where it can still be fixed, rather than letting it surface as three
+REM minutes of waiting on an API that is crash-looping on a rejected login.
+docker volume ls -q 2>nul | findstr /i /c:"postgres-data" >nul 2>&1
+if not errorlevel 1 (
+    echo.
+    echo  [warn]  A PostgreSQL volume from an earlier install is still here,
+    echo          but .env was just created with a NEW random password. The
+    echo          database still expects the old one, so the backend will not
+    echo          be able to log in and the API will never come up.
+    echo.
+    echo          Keep that data:     restore the previous POSTGRES_PASSWORD
+    echo                              in .env before continuing.
+    echo          Discard that data:  run-mpg.bat clean
+    echo.
+)
 exit /b 0
 
 
@@ -296,7 +316,7 @@ echo.
 %COMPOSE% --profile local ps
 echo.
 echo  Backend health:
-curl -fsS "http://localhost:%BACKEND_PORT%/api/v1/health"
+curl -fsS "http://127.0.0.1:%BACKEND_PORT%/api/v1/health"
 if errorlevel 1 echo  (the backend is not answering on port %BACKEND_PORT%)
 echo.
 goto :end
@@ -343,30 +363,115 @@ REM ------------------------------------------------------------------
 :wait_and_open
 echo.
 echo  Waiting for the API to become healthy (up to 3 minutes)...
+echo.
 
-set "READY="
-for /l %%I in (1,1,60) do (
-    if not defined READY (
-        curl -fsS -o nul "http://localhost:%BACKEND_PORT%/health" >nul 2>&1
-        if not errorlevel 1 (
-            set "READY=1"
-        ) else (
-            timeout /t 3 /nobreak >nul
-        )
+REM `compose up -d` returns once containers are CREATED, not once they work,
+REM so reaching this point says nothing about the API. The loop below watches
+REM the container as well as the port: a backend that exited or is
+REM crash-looping will never answer, and waiting the full three minutes for it
+REM only hides the reason. 127.0.0.1 rather than localhost, because localhost
+REM resolves to ::1 first on Windows while compose publishes on IPv4.
+set /a ATTEMPT=0
+set /a RESTARTING=0
+
+:wait_loop
+set /a ATTEMPT+=1
+
+set "BACKEND_CID="
+for /f "usebackq tokens=*" %%S in (`%COMPOSE% ps -q backend 2^>nul`) do set "BACKEND_CID=%%S"
+if not defined BACKEND_CID (
+    set "DIAG=The backend container is not running at all."
+    goto :api_failed
+)
+
+set "BACKEND_STATE="
+for /f "usebackq tokens=*" %%S in (`docker inspect -f "{{.State.Status}}" !BACKEND_CID! 2^>nul`) do set "BACKEND_STATE=%%S"
+
+if /i "!BACKEND_STATE!"=="exited" (
+    set "DIAG=The backend container started and then exited."
+    goto :api_failed
+)
+if /i "!BACKEND_STATE!"=="dead" (
+    set "DIAG=The backend container is dead."
+    goto :api_failed
+)
+if /i "!BACKEND_STATE!"=="restarting" (
+    set /a RESTARTING+=1
+    if !RESTARTING! GEQ 4 (
+        set "DIAG=The backend is crash-looping: it keeps starting and exiting."
+        goto :api_failed
     )
 )
 
+curl -fsS -o nul "http://127.0.0.1:%BACKEND_PORT%/health" >nul 2>&1
+if not errorlevel 1 goto :api_ready
+
+if !ATTEMPT! GEQ 60 (
+    set "DIAG=The API did not answer on port %BACKEND_PORT% within 3 minutes."
+    goto :api_failed
+)
+timeout /t 3 /nobreak >nul
+goto :wait_loop
+
+
+:api_failed
 echo.
-if not defined READY (
-    echo  [warn]  The API did not report healthy in time. The images may
-    echo          still be building. Check progress with:
+echo  [ERROR] !DIAG!
+echo.
+echo  ---------------------- container state -------------------------
+%COMPOSE% ps
+echo.
+echo  ---------------------- backend log (last 40) -------------------
+%COMPOSE% logs --tail=40 --no-color backend 2>&1
+echo.
+echo  ---------------------- postgres log (last 15) ------------------
+%COMPOSE% logs --tail=15 --no-color postgres 2>&1
+echo.
+echo  ----------------------------------------------------------------
+
+REM Name the cause outright when the log carries a signature we recognise,
+REM rather than leaving the reader to match it against a list of maybes.
+%COMPOSE% logs --tail=200 --no-color backend 2>&1 | findstr /i /c:"password authentication failed" >nul 2>&1
+if not errorlevel 1 (
+    echo  [cause] PostgreSQL rejected the backend's password.
     echo.
-    echo            run-mpg.bat logs
+    echo          The database volume still holds the password it was first
+    echo          created with. PostgreSQL applies POSTGRES_PASSWORD only when
+    echo          it initialises an empty volume and ignores it afterwards,
+    echo          while this script writes a fresh random one into .env any
+    echo          time .env is missing - so deleting .env and starting again
+    echo          leaves the two disagreeing. The stack still reports healthy
+    echo          because pg_isready answers without authenticating.
     echo.
-    set "EXIT_CODE=1"
-    goto :end
+    echo          Keep your data:     put the previous POSTGRES_PASSWORD back
+    echo                              into .env, then: run-mpg.bat up
+    echo          Discard your data:  run-mpg.bat clean
+    echo.
+    goto :api_failed_tail
 )
 
+%COMPOSE% logs --tail=200 --no-color backend 2>&1 | findstr /i /c:"Refusing to start" >nul 2>&1
+if not errorlevel 1 (
+    echo  [cause] The backend refused to start on a configuration guard. The
+    echo          log above names the setting; correct it in .env.
+    echo.
+    goto :api_failed_tail
+)
+
+echo  The backend log above says why. Common causes:
+echo    - a setting in .env is rejected at startup; the log names it
+echo    - migrations could not reach PostgreSQL
+echo    - port %BACKEND_PORT% is already taken by another program
+echo.
+
+:api_failed_tail
+echo  Full logs:  run-mpg.bat logs
+echo.
+set "EXIT_CODE=1"
+goto :end
+
+
+:api_ready
 echo  [ok]    API is healthy.
 echo.
 echo  ----------------------------------------------------------
