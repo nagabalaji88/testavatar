@@ -203,25 +203,3 @@ async def redeem_stream_ticket(ticket: Optional[str], run_id: str) -> Principal:
     await revocation_store.revoke_token(payload.jti, payload.exp)
 
     return Principal(user_id=uuid.UUID(payload.sub), role=payload.role)
-
-
-async def authenticate_websocket(token: Optional[str]) -> Principal:
-    """Verify a full access token supplied as a websocket query parameter.
-
-    Retained for callers that have not moved to tickets. Unlike the previous
-    version this honours revocation, so a logged-out token no longer opens a
-    socket.
-    """
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token"
-        )
-    payload = decode_token(token)
-
-    from app.core.revocation import revocation_store
-
-    if await revocation_store.is_revoked(payload.jti, payload.sub, payload.iat):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked"
-        )
-    return Principal(user_id=uuid.UUID(payload.sub), role=payload.role)

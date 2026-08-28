@@ -34,7 +34,6 @@ from app.core.security import (
     Principal,
     oauth2_scheme,
     Role,
-    authenticate_websocket,
     create_access_token,
     create_refresh_token,
     create_stream_ticket,
@@ -618,25 +617,23 @@ async def stream_run(
 ) -> None:
     """Stream pipeline events for a run.
 
-    The token is supplied as a query parameter because browsers cannot set
-    headers on a websocket handshake.
+    The credential is a query parameter because a browser cannot set headers on
+    a websocket handshake -- and because a URL reaches proxy logs, access logs
+    and browser history, what goes there is a ticket from
+    POST /runs/{id}/stream-ticket: scoped to one run, valid for about a minute,
+    and burned on first use. An access token was accepted here until every
+    client had moved over; it is account-wide and lives an hour, so a copy
+    recovered from a log was worth having.
 
-    Authenticating the token is not sufficient on its own: it establishes who
-    is calling, not whether they may read *this* run. Every REST route pairs
-    that check with _authorize_run, and the events streamed here carry the same
-    generated content those routes guard, so the pairing has to hold here too.
+    Redeeming the ticket establishes who is calling, not whether they may read
+    *this* run. Every REST route pairs authentication with _authorize_run, and
+    the events streamed here carry the same generated content those routes
+    guard, so the pairing holds here too.
     """
     try:
-        if ticket := websocket.query_params.get("ticket"):
-            principal = await redeem_stream_ticket(ticket, str(run_id))
-        else:
-            # Accepting a full access token here is the legacy path, kept so an
-            # older client keeps working. It is the weaker credential -- see
-            # create_stream_ticket -- and should be removed once no client
-            # sends it.
-            principal = await authenticate_websocket(
-                websocket.query_params.get("token")
-            )
+        principal = await redeem_stream_ticket(
+            websocket.query_params.get("ticket"), str(run_id)
+        )
         run = await _load_run(session, run_id)
         _authorize_run(run, principal)
     except HTTPException:

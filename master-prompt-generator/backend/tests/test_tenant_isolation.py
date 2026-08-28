@@ -234,3 +234,28 @@ class TestStreamTickets:
         lifetime = claims["exp"] - claims["iat"]
         assert lifetime <= settings.ws_ticket_ttl_seconds + 1
         assert lifetime < settings.access_token_ttl_minutes * 60
+
+
+class TestTheLegacyTokenPathIsGone:
+    """?token= accepted an account-wide, hour-long credential in a URL.
+
+    It existed only so clients could migrate while the ticket flow shipped.
+    The frontend has sent tickets since then, so the weaker credential is now
+    refused rather than merely deprecated -- a path that still works is a path
+    an old client, a stale bookmark or a copied URL keeps using.
+    """
+
+    def test_the_route_redeems_a_ticket_and_nothing_else(self) -> None:
+        from app.api.v1 import endpoints
+
+        source = inspect.getsource(endpoints.stream_run)
+        assert "redeem_stream_ticket(" in source
+        assert 'query_params.get("token")' not in source, (
+            "the access-token path is back"
+        )
+
+    def test_the_helper_it_used_is_removed(self) -> None:
+        """Left in place it invites a caller to reintroduce the same hole."""
+        import app.core.security as security
+
+        assert not hasattr(security, "authenticate_websocket")
