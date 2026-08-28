@@ -173,6 +173,14 @@ services:
       - --concurrency=${CELERY_CONCURRENCY:-4}
       - --without-gossip
       - --without-mingle
+    # SIGTERM starts a Celery warm shutdown, which waits for the task in
+    # flight. Docker's default grace is 10s, so a redeploy used to SIGKILL
+    # mid-run. Because task_acks_late is on, the killed task is redelivered
+    # rather than lost -- but a prompt run is redelivered by re-issuing every
+    # model call, so the cost is paid twice. 60s covers a normal run without
+    # making a deploy wait out the 18-minute soft time limit; anything still
+    # running past it is killed and retried as before.
+    stop_grace_period: 60s
     environment: *backend-env
     volumes:
       - ./backend/config:/srv/config
