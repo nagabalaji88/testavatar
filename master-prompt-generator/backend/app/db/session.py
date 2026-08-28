@@ -58,11 +58,28 @@ SessionFactory = async_sessionmaker(
 
 
 async def init_database() -> None:
-    """Create tables that do not exist yet.
+    """Create missing tables, in local development only.
 
-    Alembic owns migrations in production; this keeps local and test
-    environments usable without a migration step.
+    create_all creates tables that are absent and does nothing whatsoever to
+    tables that already exist -- it will not add a column, widen a type or drop
+    an index. On a fresh database that is indistinguishable from a migration;
+    on the second deploy it silently applies nothing, and the application then
+    runs against a schema that no longer matches its models, failing at query
+    time rather than at startup.
+
+    So outside local it does not run at all: `alembic upgrade head` owns the
+    schema, and a deployment that skips it fails loudly on a missing table
+    instead of quietly on a missing column. The docstring here used to claim
+    Alembic owned production while no migration environment existed; it does
+    now, under backend/alembic.
     """
+    if settings.environment != "local":
+        logger.info(
+            "schema_managed_by_alembic",
+            extra={"environment": settings.environment},
+        )
+        return
+
     import app.models.domain  # noqa: F401  (register mappers before create_all)
 
     async with engine.begin() as conn:

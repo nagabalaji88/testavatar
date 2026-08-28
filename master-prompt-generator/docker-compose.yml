@@ -14,6 +14,10 @@ x-backend-env: &backend-env
   # has to be settable from here -- without it a production compose deploy
   # would be unbootable with no way to satisfy the guard.
   ALLOW_OPEN_REGISTRATION: ${ALLOW_OPEN_REGISTRATION:-true}
+  # Applied by the api service only -- see the RUN_MIGRATIONS override there.
+  # Two containers running `alembic upgrade head` at once race on the version
+  # table, so the worker inherits this as false.
+  RUN_MIGRATIONS: "false"
   # Per-registry-entry credential for a hosted open-weight deployment; the
   # models.json entry names this variable via api_key_env.
   OLLAMA_CLOUD_API_KEY: ${OLLAMA_CLOUD_API_KEY:-}
@@ -136,7 +140,11 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      # The API is the one service that migrates. The worker starts from the
+      # same image and would race it on the version table.
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
     volumes:
       # Providers are configured declaratively; mounting the file lets operators
       # add models without rebuilding the image.
