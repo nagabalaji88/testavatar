@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import Editor, { type Monaco } from '@monaco-editor/react';
+import Editor from '@monaco-editor/react';
 import { motion } from 'framer-motion';
 import { Check, Copy, Download, Merge, Scale, ShieldPlus, Sparkles } from 'lucide-react';
 import type { ConsensusPrompt } from '@/types';
@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/Badge';
 import { ScoreRing } from '@/components/charts/ScoreRing';
 import { api } from '@/services/api';
 import { formatNumber } from '@/lib/utils';
+import { useTheme } from '@/lib/theme';
+import { SINGLE_THEME, defineEditorThemes, editorTheme } from '@/lib/monacoTheme';
 
 const EXPORT_FORMATS = ['markdown', 'json', 'yaml', 'xml', 'python', 'typescript'] as const;
 
@@ -21,21 +23,6 @@ const STRATEGY_TONE: Record<string, 'neutral' | 'info' | 'success' | 'accent' | 
   synthesized: 'warning',
 };
 
-function defineTheme(monaco: Monaco): void {
-  monaco.editor.defineTheme('mpg-glass-single', {
-    base: 'vs-dark',
-    inherit: true,
-    rules: [],
-    colors: {
-      'editor.background': '#00000000',
-      'editor.lineHighlightBackground': '#ffffff08',
-      'editorLineNumber.foreground': '#ffffff2e',
-      'editorGutter.background': '#00000000',
-      'scrollbarSlider.background': '#ffffff18',
-    },
-  });
-}
-
 export function ConsensusPanel({
   consensus,
   runId,
@@ -43,6 +30,7 @@ export function ConsensusPanel({
   consensus: ConsensusPrompt | null;
   runId: string | null;
 }) {
+  const { resolved } = useTheme();
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
 
@@ -164,8 +152,8 @@ export function ConsensusPanel({
           height="100%"
           language="markdown"
           value={consensus.content}
-          beforeMount={defineTheme}
-          theme="mpg-glass-single"
+          beforeMount={defineEditorThemes}
+          theme={editorTheme(SINGLE_THEME, resolved)}
           options={{
             readOnly: true,
             minimap: { enabled: false },
@@ -202,9 +190,9 @@ export function ConsensusPanel({
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: index * 0.03 }}
-                    className="border-t border-white/6"
+                    className="border-t border-line-1"
                   >
-                    <td className="py-2 pr-3 text-white/90">{item.section}</td>
+                    <td className="py-2 pr-3 text-ink-1">{item.section}</td>
                     <td className="py-2 pr-3 text-dim">{item.source_model_name}</td>
                     <td className="py-2 pr-3 font-mono tabular-nums text-dim">
                       {item.score.toFixed(1)}
@@ -254,7 +242,7 @@ export function ConsensusPanel({
                   >
                     {conflict.kind}
                   </Badge>
-                  <span className="font-medium text-white/90">{conflict.section}</span>
+                  <span className="font-medium text-ink-1">{conflict.section}</span>
                 </div>
                 <p className="text-dim">{conflict.description}</p>
                 <p className="mt-1 text-[11.5px] text-faint">→ {conflict.resolution}</p>
@@ -281,7 +269,7 @@ export function ConsensusPanel({
                     <ShieldPlus className="size-3" />
                     {item.id.replace(/_/g, ' ')}
                   </Badge>
-                  <span className="font-medium text-white/90">{item.section}</span>
+                  <span className="font-medium text-ink-1">{item.section}</span>
                 </div>
                 <p className="text-dim">{item.rationale}</p>
                 <p className="mt-1 font-mono text-[11px] leading-relaxed text-faint">

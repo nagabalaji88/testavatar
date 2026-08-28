@@ -52,12 +52,12 @@ export function SectionHeader({ title, subtitle, icon, action }: SectionHeaderPr
     <div className="mb-4 flex items-start justify-between gap-4">
       <div className="flex items-start gap-3">
         {icon ? (
-          <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-white/8 text-aurora-300 ring-1 ring-white/10">
+          <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-surface-3 text-aurora-300 ring-1 ring-line-2">
             {icon}
           </span>
         ) : null}
         <div>
-          <h2 className="text-[15px] font-semibold tracking-tight text-white">
+          <h2 className="text-[15px] font-semibold tracking-tight text-ink-strong">
             {title}
           </h2>
           {subtitle ? (

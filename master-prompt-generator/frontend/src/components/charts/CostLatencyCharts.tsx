@@ -9,7 +9,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { Candidate } from '@/types';
-import { AXIS_COLOR, GRID_COLOR, TEXT_MUTED, TEXT_SECONDARY, seriesColor } from '@/lib/viz';
+import { seriesColor, useVizTheme } from '@/lib/viz';
 import { formatCurrency, formatDuration } from '@/lib/utils';
 
 interface Datum {
@@ -33,9 +33,9 @@ function BarTooltip({
   if (!datum) return null;
   return (
     <div className="glass-elevated rounded-xl px-3 py-2 text-[12px]">
-      <p className="font-medium text-white">{datum.model}</p>
+      <p className="font-medium text-ink-strong">{datum.model}</p>
       <p className="text-dim">
-        {unit}: <span className="font-mono text-white">{formatter(datum.value)}</span>
+        {unit}: <span className="font-mono text-ink-strong">{formatter(datum.value)}</span>
       </p>
     </div>
   );
@@ -52,29 +52,30 @@ function MeasureChart({
   formatter: (value: number) => string;
   unit: string;
 }) {
+  const viz = useVizTheme();
   return (
     <div>
       <h3 className="mb-2 text-[12px] font-medium text-dim">{title}</h3>
       <div className="h-[188px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -12 }}>
-            <CartesianGrid stroke={GRID_COLOR} vertical={false} />
+            <CartesianGrid stroke={viz.GRID_COLOR} vertical={false} />
             <XAxis
               dataKey="model"
-              tick={{ fill: TEXT_SECONDARY, fontSize: 10 }}
+              tick={{ fill: viz.TEXT_SECONDARY, fontSize: 10 }}
               tickLine={false}
-              axisLine={{ stroke: AXIS_COLOR }}
+              axisLine={{ stroke: viz.AXIS_COLOR }}
               interval={0}
             />
             <YAxis
-              tick={{ fill: TEXT_MUTED, fontSize: 10 }}
+              tick={{ fill: viz.TEXT_MUTED, fontSize: 10 }}
               tickLine={false}
               axisLine={false}
               width={52}
               tickFormatter={(value: number) => formatter(value)}
             />
             <Tooltip
-              cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+              cursor={{ fill: viz.GRID_COLOR }}
               content={<BarTooltip formatter={formatter} unit={unit} />}
             />
             <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={34}>
@@ -82,7 +83,7 @@ function MeasureChart({
                 <Cell
                   key={datum.model}
                   fill={seriesColor(datum.index)}
-                  stroke="#0a0d1c"
+                  stroke={viz.SURFACE}
                   strokeWidth={2}
                 />
               ))}

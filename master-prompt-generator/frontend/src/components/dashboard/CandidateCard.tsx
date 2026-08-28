@@ -21,7 +21,7 @@ export function CandidateCard({ candidate, rank, isLeader }: CandidateCardProps)
   return (
     <GlassCard
       elevated={isLeader}
-      className={cn('p-0', isLeader && 'ring-1 ring-white/20')}
+      className={cn('p-0', isLeader && 'ring-1 ring-line-3')}
     >
       <div className="flex items-start gap-3 p-4">
         <span
@@ -31,11 +31,11 @@ export function CandidateCard({ candidate, rank, isLeader }: CandidateCardProps)
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="truncate text-[14px] font-semibold text-white">
+            <h3 className="truncate text-[14px] font-semibold text-ink-strong">
               {candidate.model_name}
             </h3>
             {isLeader ? (
-              <span className="rounded-full bg-white/12 px-2 py-0.5 text-[10px] font-medium tracking-wide text-white uppercase">
+              <span className="rounded-full bg-surface-4 px-2 py-0.5 text-[10px] font-medium tracking-wide text-ink-strong uppercase">
                 Leader
               </span>
             ) : null}
@@ -46,19 +46,19 @@ export function CandidateCard({ candidate, rank, isLeader }: CandidateCardProps)
           <dl className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
             <div>
               <dt className="text-faint">Latency</dt>
-              <dd className="font-mono tabular-nums text-white/85">
+              <dd className="font-mono tabular-nums text-ink-1">
                 {formatDuration(candidate.latency_ms)}
               </dd>
             </div>
             <div>
               <dt className="text-faint">Cost</dt>
-              <dd className="font-mono tabular-nums text-white/85">
+              <dd className="font-mono tabular-nums text-ink-1">
                 {formatCurrency(candidate.cost_usd)}
               </dd>
             </div>
             <div>
               <dt className="text-faint">Tokens</dt>
-              <dd className="font-mono tabular-nums text-white/85">
+              <dd className="font-mono tabular-nums text-ink-1">
                 {formatNumber(candidate.input_tokens + candidate.output_tokens)}
               </dd>
             </div>
@@ -75,7 +75,7 @@ export function CandidateCard({ candidate, rank, isLeader }: CandidateCardProps)
             type="button"
             onClick={() => setExpanded((value) => !value)}
             aria-expanded={expanded}
-            className="grid size-7 place-items-center rounded-lg text-white/55 transition hover:bg-white/8 hover:text-white"
+            className="grid size-7 place-items-center rounded-lg text-ink-3 transition hover:bg-surface-3 hover:text-ink-strong"
           >
             <ChevronDown
               className={cn('size-4 transition-transform', expanded && 'rotate-180')}

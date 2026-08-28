@@ -66,11 +66,11 @@ function CredentialRow({
   const error = save.error ?? clear.error;
 
   return (
-    <li className="rounded-xl bg-white/[0.03] px-4 py-3.5 ring-1 ring-inset ring-white/10">
+    <li className="rounded-xl bg-surface-1 px-4 py-3.5 ring-1 ring-inset ring-line-2">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[13px] font-medium text-white/90">
+            <span className="text-[13px] font-medium text-ink-1">
               {status.label}
             </span>
 
@@ -170,7 +170,7 @@ function CredentialRow({
               href={status.console_url}
               target="_blank"
               rel="noreferrer noopener"
-              className="inline-flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-[12px] text-dim transition hover:bg-white/[0.07] hover:text-white"
+              className="inline-flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-[12px] text-dim transition hover:bg-surface-3 hover:text-ink-strong"
             >
               Get a key
               <ExternalLink className="size-3" />

@@ -65,20 +65,20 @@ function ModelRow({ model, onAdded }: { model: DiscoveredModel; onAdded: () => v
   });
 
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3 border-t border-white/6 py-2.5">
+    <li className="flex flex-wrap items-center justify-between gap-3 border-t border-line-1 py-2.5">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="text-[12.5px] font-medium text-white/90">
+          <span className="text-[12.5px] font-medium text-ink-1">
             {model.display_name}
           </span>
-          <code className="rounded bg-white/6 px-1.5 py-0.5 font-mono text-[10.5px] text-faint">
+          <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[10.5px] text-faint">
             {model.model_key}
           </code>
         </div>
         <p className="mt-1 flex flex-wrap items-center gap-x-3 text-[11px] text-faint">
           <span>
             in {price(model.cost_per_1k_input)} · out {price(model.cost_per_1k_output)}
-            <span className="ml-1 text-white/25">/1k</span>
+            <span className="ml-1 text-ink-4">/1k</span>
           </span>
           {model.max_tokens ? <span>{formatNumber(model.max_tokens)} ctx</span> : null}
           {model.supports_json_mode ? <span>json mode</span> : null}
@@ -139,10 +139,10 @@ function FamilySection({
   const hidden = matches.length - shown.length;
 
   return (
-    <section className="rounded-xl bg-white/[0.03] px-4 py-3.5 ring-1 ring-inset ring-white/10">
+    <section className="rounded-xl bg-surface-1 px-4 py-3.5 ring-1 ring-inset ring-line-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <h3 className="text-[13px] font-medium text-white/90">{discovery.label}</h3>
+          <h3 className="text-[13px] font-medium text-ink-1">{discovery.label}</h3>
           {!discovery.configured ? (
             <Badge tone="neutral">no key</Badge>
           ) : discovery.error ? (
@@ -246,7 +246,7 @@ export function ModelCatalog() {
       />
 
       <div className="relative mb-3">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-white/30" />
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-ink-4" />
         <input
           value={filter}
           onChange={(event) => setFilter(event.target.value)}

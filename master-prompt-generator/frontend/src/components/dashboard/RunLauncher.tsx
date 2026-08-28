@@ -58,7 +58,7 @@ function TagInput({
               <button
                 type="button"
                 onClick={() => onChange(values.filter((item) => item !== value))}
-                className="inline-flex items-center gap-1.5 rounded-full bg-white/8 px-2.5 py-1 text-[11px] text-white/80 ring-1 ring-inset ring-white/12 transition hover:bg-white/12"
+                className="inline-flex items-center gap-1.5 rounded-full bg-surface-3 px-2.5 py-1 text-[11px] text-ink-1 ring-1 ring-inset ring-line-2 transition hover:bg-surface-4"
               >
                 {value}
                 <X className="size-3" />
@@ -227,7 +227,7 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
               className={inputClass}
             >
               {['markdown', 'json', 'xml', 'yaml'].map((format) => (
-                <option key={format} value={format} className="bg-[#0a0d1c]">
+                <option key={format} value={format} className="bg-void-900 text-ink-strong">
                   {format}
                 </option>
               ))}
@@ -272,8 +272,8 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
                   className={cn(
                     'rounded-xl px-3 py-2 text-[12px] ring-1 ring-inset transition',
                     active
-                      ? 'bg-aurora-500/20 text-white ring-aurora-400/45'
-                      : 'bg-white/[0.04] text-dim ring-white/10 hover:bg-white/8',
+                      ? 'bg-aurora-500/20 text-accent-ink ring-aurora-400/45'
+                      : 'bg-surface-1 text-dim ring-line-2 hover:bg-surface-3',
                   )}
                 >
                   {model.name}
@@ -307,7 +307,7 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
           </div>
 
           {blocked.length ? (
-            <div className="mt-3 rounded-xl bg-white/[0.03] px-3 py-2.5 ring-1 ring-inset ring-white/10">
+            <div className="mt-3 rounded-xl bg-surface-1 px-3 py-2.5 ring-1 ring-inset ring-line-2">
               <p className="mb-1.5 text-[12px] font-medium text-dim">
                 Needs a key before it can be selected
               </p>
@@ -321,7 +321,7 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
                     <span aria-hidden="true">·</span>
                     <span>
                       needs{' '}
-                      <code className="rounded bg-white/8 px-1 py-0.5 font-mono text-[11px] text-dim">
+                      <code className="rounded bg-surface-3 px-1 py-0.5 font-mono text-[11px] text-dim">
                         {model.credential_env_var ?? 'an API key'}
                       </code>
                     </span>

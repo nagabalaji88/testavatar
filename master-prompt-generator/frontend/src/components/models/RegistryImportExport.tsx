@@ -127,9 +127,9 @@ export function RegistryImportExport({ registrySize }: { registrySize: number })
           const file = event.dataTransfer.files[0];
           if (file) void onFile(file);
         }}
-        className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-4 py-6 text-center"
+        className="rounded-xl border border-dashed border-line-3 bg-surface-1 px-4 py-6 text-center"
       >
-        <Upload className="mx-auto mb-2 size-5 text-white/30" />
+        <Upload className="mx-auto mb-2 size-5 text-ink-4" />
         <p className="text-[12.5px] text-dim">
           Drop a <code className="font-mono text-[11.5px]">models.json</code> here, or{' '}
           <button
@@ -165,9 +165,9 @@ export function RegistryImportExport({ registrySize }: { registrySize: number })
       ) : null}
 
       {staged ? (
-        <div className="mt-3 rounded-xl bg-white/[0.03] px-4 py-3.5 ring-1 ring-inset ring-white/10">
+        <div className="mt-3 rounded-xl bg-surface-1 px-4 py-3.5 ring-1 ring-inset ring-line-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[12.5px] text-white/90">
+            <span className="text-[12.5px] text-ink-1">
               <code className="font-mono text-[11.5px]">{staged.filename}</code>
               <span className="ml-2 text-faint">
                 {staged.providers.length} model
@@ -185,7 +185,7 @@ export function RegistryImportExport({ registrySize }: { registrySize: number })
                 key={`${provider.id}-${index}`}
                 className="flex flex-wrap items-baseline gap-x-2 text-[11.5px] text-faint"
               >
-                <code className="font-mono text-white/70">{provider.id}</code>
+                <code className="font-mono text-ink-2">{provider.id}</code>
                 <span>{provider.model_key}</span>
               </li>
             ))}
@@ -205,8 +205,8 @@ export function RegistryImportExport({ registrySize }: { registrySize: number })
                   className={cn(
                     'rounded-xl px-3 py-2 text-left text-[12px] ring-1 ring-inset transition',
                     mode === option
-                      ? 'bg-aurora-500/20 text-white ring-aurora-400/45'
-                      : 'bg-white/[0.04] text-dim ring-white/10 hover:bg-white/8',
+                      ? 'bg-aurora-500/20 text-accent-ink ring-aurora-400/45'
+                      : 'bg-surface-1 text-dim ring-line-2 hover:bg-surface-3',
                   )}
                 >
                   <span className="block font-medium capitalize">{option}</span>
@@ -249,7 +249,7 @@ export function RegistryImportExport({ registrySize }: { registrySize: number })
       ) : null}
 
       {result ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-white/[0.03] px-4 py-3 ring-1 ring-inset ring-white/10">
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-surface-1 px-4 py-3 ring-1 ring-inset ring-line-2">
           <Badge tone="success">{result.added.length} added</Badge>
           <Badge tone="info">{result.updated.length} updated</Badge>
           {result.removed.length ? (

@@ -9,15 +9,7 @@ import {
   Tooltip,
 } from 'recharts';
 import type { Candidate, ConsensusPrompt, MetricDefinition } from '@/types';
-import {
-  AXIS_COLOR,
-  CONSENSUS_COLOR,
-  GRID_COLOR,
-  MAX_SERIES,
-  TEXT_MUTED,
-  TEXT_SECONDARY,
-  seriesColor,
-} from '@/lib/viz';
+import { MAX_SERIES, seriesColor, useVizTheme } from '@/lib/viz';
 import { metricLabel } from '@/lib/utils';
 
 interface ScoreRadarProps {
@@ -50,7 +42,7 @@ function ChartTooltip({
   if (!active || !payload?.length) return null;
   return (
     <div className="glass-elevated rounded-xl px-3 py-2 text-[12px]">
-      <p className="mb-1.5 font-medium text-white">{label}</p>
+      <p className="mb-1.5 font-medium text-ink-strong">{label}</p>
       <ul className="space-y-1">
         {payload.map((entry) => (
           <li key={String(entry.name)} className="flex items-center gap-2">
@@ -60,7 +52,7 @@ function ChartTooltip({
               aria-hidden
             />
             <span className="text-dim">{entry.name}</span>
-            <span className="ml-auto font-mono text-white">
+            <span className="ml-auto font-mono text-ink-strong">
               {Number(entry.value ?? 0).toFixed(1)}
             </span>
           </li>
@@ -78,6 +70,7 @@ function ChartTooltip({
  * unvalidated hues here.
  */
 export function ScoreRadar({ candidates, consensus, definitions }: ScoreRadarProps) {
+  const viz = useVizTheme();
   const ranked = useMemo(
     () =>
       [...candidates]
@@ -122,17 +115,17 @@ export function ScoreRadar({ candidates, consensus, definitions }: ScoreRadarPro
       <div className="h-[340px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <RadarChart data={rows} outerRadius="72%">
-            <PolarGrid stroke={GRID_COLOR} strokeWidth={1} />
+            <PolarGrid stroke={viz.GRID_COLOR} strokeWidth={1} />
             <PolarAngleAxis
               dataKey="metric"
-              tick={{ fill: TEXT_SECONDARY, fontSize: 10.5 }}
+              tick={{ fill: viz.TEXT_SECONDARY, fontSize: 10.5 }}
               tickLine={false}
             />
             <PolarRadiusAxis
               domain={[0, 100]}
               tickCount={5}
-              axisLine={{ stroke: AXIS_COLOR }}
-              tick={{ fill: TEXT_MUTED, fontSize: 9 }}
+              axisLine={{ stroke: viz.AXIS_COLOR }}
+              tick={{ fill: viz.TEXT_MUTED, fontSize: 9 }}
               angle={90}
             />
             {ranked.map((candidate, index) => (
@@ -152,16 +145,16 @@ export function ScoreRadar({ candidates, consensus, definitions }: ScoreRadarPro
               <Radar
                 name="Consensus"
                 dataKey="Consensus"
-                stroke={CONSENSUS_COLOR}
+                stroke={viz.CONSENSUS_COLOR}
                 strokeWidth={3}
                 strokeDasharray="6 3"
-                fill={CONSENSUS_COLOR}
+                fill={viz.CONSENSUS_COLOR}
                 fillOpacity={0.06}
-                dot={{ r: 3, strokeWidth: 0, fill: CONSENSUS_COLOR }}
+                dot={{ r: 3, strokeWidth: 0, fill: viz.CONSENSUS_COLOR }}
                 isAnimationActive={false}
               />
             ) : null}
-            <Tooltip content={<ChartTooltip />} cursor={{ stroke: AXIS_COLOR }} />
+            <Tooltip content={<ChartTooltip />} cursor={{ stroke: viz.AXIS_COLOR }} />
           </RadarChart>
         </ResponsiveContainer>
       </div>
@@ -181,11 +174,11 @@ export function ScoreRadar({ candidates, consensus, definitions }: ScoreRadarPro
           </li>
         ))}
         {consensus?.metrics ? (
-          <li className="flex items-center gap-2 text-[12px] font-medium text-white">
+          <li className="flex items-center gap-2 text-[12px] font-medium text-ink-strong">
             <span
               className="h-[3px] w-4 rounded-full"
               style={{
-                backgroundImage: `repeating-linear-gradient(90deg, ${CONSENSUS_COLOR} 0 6px, transparent 6px 9px)`,
+                backgroundImage: `repeating-linear-gradient(90deg, ${viz.CONSENSUS_COLOR} 0 6px, transparent 6px 9px)`,
               }}
               aria-hidden
             />

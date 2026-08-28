@@ -6,7 +6,7 @@ import { GlassCard, SectionHeader } from '@/components/ui/GlassCard';
 import { cn } from '@/lib/utils';
 
 const DOT_COLOR: Record<RunEventType, string> = {
-  'run.queued': 'bg-white/40',
+  'run.queued': 'bg-marker-2',
   'run.started': 'bg-aurora-400',
   'stage.started': 'bg-aurora-400',
   'stage.completed': 'bg-mint-400',
@@ -17,7 +17,7 @@ const DOT_COLOR: Record<RunEventType, string> = {
   'consensus.completed': 'bg-plasma-400',
   'run.completed': 'bg-mint-400',
   'run.failed': 'bg-rose-400',
-  log: 'bg-white/30',
+  log: 'bg-marker-1',
 };
 
 const CONNECTION_LABEL: Record<ConnectionState, string> = {
@@ -85,7 +85,7 @@ export function EventTimeline({
                   ? 'animate-pulse-ring bg-mint-400'
                   : connection === 'error'
                     ? 'bg-rose-400'
-                    : 'bg-white/35',
+                    : 'bg-marker-2',
               )}
             />
             {CONNECTION_LABEL[connection]}
@@ -110,7 +110,7 @@ export function EventTimeline({
                 aria-hidden
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-white/85">{describe(event)}</p>
+                <p className="truncate text-ink-1">{describe(event)}</p>
                 <time
                   dateTime={event.emitted_at}
                   className="text-[10.5px] tabular-nums text-faint"

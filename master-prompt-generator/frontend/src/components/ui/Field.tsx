@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
  *  launcher, the model form and the key panel all need identical inputs, and a
  *  drifting copy is immediately visible when two of them sit on one page. */
 export const inputClass =
-  'w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2.5 text-[13px] text-white placeholder:text-white/30 outline-none transition focus:border-aurora-400/60 focus:bg-white/[0.07] disabled:opacity-50';
+  'w-full rounded-xl border border-line-2 bg-surface-2 px-3 py-2.5 text-[13px] text-ink-strong placeholder:text-ink-4 outline-none transition focus:border-aurora-400/60 focus:bg-surface-3 disabled:opacity-50';
 
 export function Field({
   label,

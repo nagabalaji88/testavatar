@@ -13,6 +13,7 @@ import { CheckCircle2, CircleDashed, Loader2, XCircle } from 'lucide-react';
 import type { Candidate } from '@/types';
 import type { StageState } from '@/store/useRunStore';
 import { cn, formatDuration } from '@/lib/utils';
+import { useVizTheme } from '@/lib/viz';
 
 type NodeState = 'pending' | 'active' | 'done' | 'failed';
 
@@ -23,17 +24,17 @@ interface FlowNodeData {
 }
 
 const STATE_STYLES: Record<NodeState, string> = {
-  pending: 'border-white/10 text-white/45',
-  active: 'border-aurora-400/60 text-white shadow-[0_0_28px_rgba(89,133,255,0.35)]',
-  done: 'border-mint-400/40 text-white',
-  failed: 'border-rose-400/50 text-white',
+  pending: 'border-line-2 text-ink-3',
+  active: 'border-aurora-400/60 text-ink-strong shadow-[0_0_28px_rgba(89,133,255,0.35)]',
+  done: 'border-mint-400/40 text-ink-strong',
+  failed: 'border-rose-400/50 text-ink-strong',
 };
 
 function StateIcon({ state }: { state: NodeState }) {
   if (state === 'active') return <Loader2 className="size-3.5 animate-spin text-aurora-300" />;
   if (state === 'done') return <CheckCircle2 className="size-3.5 text-mint-400" />;
   if (state === 'failed') return <XCircle className="size-3.5 text-rose-400" />;
-  return <CircleDashed className="size-3.5 text-white/35" />;
+  return <CircleDashed className="size-3.5 text-ink-4" />;
 }
 
 function FlowNode({ data }: NodeProps<FlowNodeData>) {
@@ -44,13 +45,13 @@ function FlowNode({ data }: NodeProps<FlowNodeData>) {
         STATE_STYLES[data.state],
       )}
     >
-      <Handle type="target" position={Position.Left} className="!size-1.5 !border-0 !bg-white/30" />
+      <Handle type="target" position={Position.Left} className="!size-1.5 !border-0 !bg-marker-1" />
       <div className="flex items-center gap-2">
         <StateIcon state={data.state} />
         <span className="text-[12.5px] font-medium tracking-tight">{data.title}</span>
       </div>
       <p className="mt-1 pl-5.5 text-[11px] text-dim">{data.subtitle}</p>
-      <Handle type="source" position={Position.Right} className="!size-1.5 !border-0 !bg-white/30" />
+      <Handle type="source" position={Position.Right} className="!size-1.5 !border-0 !bg-marker-1" />
     </div>
   );
 }
@@ -64,6 +65,7 @@ interface PipelineGraphProps {
 
 /** Live execution topology: analysis → parallel fan-out → judge → consensus. */
 export function PipelineGraph({ stages, candidates }: PipelineGraphProps) {
+  const viz = useVizTheme();
   const { nodes, edges } = useMemo(() => {
     const stageState = (key: string): NodeState =>
       (stages.find((stage) => stage.key === key)?.status ?? 'pending') as NodeState;
@@ -145,14 +147,14 @@ export function PipelineGraph({ stages, candidates }: PipelineGraphProps) {
           source: 'analysis',
           target: `model-${candidate.model_id}`,
           animated: candidate.status === 'running',
-          style: { stroke: 'rgba(255,255,255,0.18)', strokeWidth: 1.5 },
+          style: { stroke: viz.EDGE_COLOR, strokeWidth: 1.5 },
         },
         {
           id: `${candidate.model_id}-evaluation`,
           source: `model-${candidate.model_id}`,
           target: 'evaluation',
           animated: candidate.status === 'running',
-          style: { stroke: 'rgba(255,255,255,0.18)', strokeWidth: 1.5 },
+          style: { stroke: viz.EDGE_COLOR, strokeWidth: 1.5 },
         },
       ]),
       {
@@ -160,19 +162,19 @@ export function PipelineGraph({ stages, candidates }: PipelineGraphProps) {
         source: 'evaluation',
         target: 'consensus',
         animated: stageState('consensus') === 'active',
-        style: { stroke: 'rgba(255,255,255,0.22)', strokeWidth: 1.5 },
+        style: { stroke: viz.EDGE_ACTIVE, strokeWidth: 1.5 },
       },
       {
         id: 'consensus-elite',
         source: 'consensus',
         target: 'elite',
         animated: stageState('consensus') === 'active',
-        style: { stroke: 'rgba(255,255,255,0.22)', strokeWidth: 1.5 },
+        style: { stroke: viz.EDGE_ACTIVE, strokeWidth: 1.5 },
       },
     ];
 
     return { nodes: flowNodes, edges: flowEdges };
-  }, [stages, candidates]);
+  }, [stages, candidates, viz]);
 
   return (
     <div className="glass-inset h-[300px] overflow-hidden rounded-2xl">
@@ -193,7 +195,7 @@ export function PipelineGraph({ stages, candidates }: PipelineGraphProps) {
           variant={BackgroundVariant.Dots}
           gap={22}
           size={1}
-          color="rgba(255,255,255,0.09)"
+          color={viz.FAINT_LINE}
         />
       </ReactFlow>
     </div>

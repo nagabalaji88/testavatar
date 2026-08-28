@@ -1,14 +1,30 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light dark" />
     <meta
       name="description"
       content="Master Prompt Generator — multi-LLM consensus prompt engineering platform."
     />
     <title>Master Prompt Generator</title>
+    <script>
+      // Runs before the first paint, so a viewer whose stored choice differs
+      // from their OS does not see the other theme flash first. React sets
+      // the same attribute once it mounts; this only has to beat it there.
+      // Kept in sync with applyChoice() in src/lib/theme.tsx.
+      (function () {
+        try {
+          var stored = localStorage.getItem('mpg-theme');
+          if (stored === 'light' || stored === 'dark') {
+            document.documentElement.setAttribute('data-theme', stored);
+          }
+        } catch (e) {
+          // Site data blocked. Falling through leaves the OS in charge.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

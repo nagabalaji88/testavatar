@@ -53,7 +53,7 @@ export function HomePage() {
                 <p className="text-[11px] tracking-wide text-faint uppercase">
                   {tile.label}
                 </p>
-                <p className="mt-1.5 font-mono text-[20px] font-semibold tabular-nums text-white">
+                <p className="mt-1.5 font-mono text-[20px] font-semibold tabular-nums text-ink-strong">
                   {tile.value}
                 </p>
               </motion.div>
@@ -73,10 +73,10 @@ export function HomePage() {
             <li key={run.id}>
               <Link
                 to={`/runs/${run.id}`}
-                className="glass-inset group flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.06]"
+                className="glass-inset group flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-surface-2"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-medium text-white/90">
+                  <p className="truncate text-[13px] font-medium text-ink-1">
                     {run.title}
                   </p>
                   <p className="mt-0.5 truncate text-[11px] text-faint">
@@ -85,13 +85,13 @@ export function HomePage() {
                   </p>
                 </div>
                 <RunStatusBadge status={run.status} />
-                <ArrowUpRight className="size-4 shrink-0 text-white/30 transition group-hover:text-white/70" />
+                <ArrowUpRight className="size-4 shrink-0 text-ink-4 transition group-hover:text-ink-2" />
               </Link>
             </li>
           ))}
           {!runs.length ? (
             <li className="grid place-items-center py-10 text-center">
-              <Trophy className="mb-2 size-6 text-white/20" />
+              <Trophy className="mb-2 size-6 text-ink-4" />
               <p className="text-[12.5px] text-faint">
                 No runs yet. Launch one to build your first Elite Prompt.
               </p>

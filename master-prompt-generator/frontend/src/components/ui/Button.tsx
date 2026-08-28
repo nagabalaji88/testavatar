@@ -12,9 +12,9 @@ const buttonVariants = cva(
         primary:
           'bg-gradient-to-b from-aurora-400 to-aurora-600 text-white shadow-[0_6px_20px_rgba(31,62,245,0.45)] hover:brightness-110 active:brightness-95',
         glass:
-          'glass text-white hover:bg-white/10 active:bg-white/[0.06]',
+          'glass text-ink-strong hover:bg-surface-4 active:bg-surface-2',
         ghost:
-          'text-dim hover:bg-white/[0.07] hover:text-white',
+          'text-dim hover:bg-surface-3 hover:text-ink-strong',
         danger:
           'bg-rose-400/15 text-rose-400 ring-1 ring-inset ring-rose-400/30 hover:bg-rose-400/25',
       },

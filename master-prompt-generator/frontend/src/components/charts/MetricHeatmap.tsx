@@ -86,7 +86,7 @@ export function MetricHeatmap({
                 <th
                   scope="row"
                   className={`pr-3 text-left text-[12px] font-medium ${
-                    row.hero ? 'text-white' : 'text-dim'
+                    row.hero ? 'text-ink-strong' : 'text-dim'
                   }`}
                 >
                   {row.label}

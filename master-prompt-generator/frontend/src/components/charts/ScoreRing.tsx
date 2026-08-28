@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { sequentialContinuous } from '@/lib/viz';
+import { sequentialContinuous, useVizTheme } from '@/lib/viz';
 import { cn } from '@/lib/utils';
 
 interface ScoreRingProps {
@@ -25,6 +25,7 @@ export function ScoreRing({
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const color = sequentialContinuous(clamped);
+  const viz = useVizTheme();
 
   return (
     <div className={cn('relative grid place-items-center', className)}>
@@ -40,7 +41,7 @@ export function ScoreRing({
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke="rgba(255,255,255,0.08)"
+          stroke={viz.FAINT_LINE}
           strokeWidth={strokeWidth}
         />
         <motion.circle
@@ -58,7 +59,7 @@ export function ScoreRing({
         />
       </svg>
       <div className="absolute flex flex-col items-center">
-        <span className="font-mono text-[30px] font-semibold leading-none tabular-nums text-white">
+        <span className="font-mono text-[30px] font-semibold leading-none tabular-nums text-ink-strong">
           {clamped.toFixed(1)}
         </span>
         {label ? (

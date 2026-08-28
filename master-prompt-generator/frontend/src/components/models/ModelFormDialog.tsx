@@ -109,7 +109,7 @@ export function ModelFormDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-[#03040c]/75 backdrop-blur-sm" />
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-scrim backdrop-blur-sm" />
         <Dialog.Content
           className={cn(
             'fixed left-1/2 top-1/2 z-50 w-[min(94vw,640px)] -translate-x-1/2 -translate-y-1/2',
@@ -118,7 +118,7 @@ export function ModelFormDialog({
         >
           <div className="mb-4 flex items-start justify-between gap-4">
             <div>
-              <Dialog.Title className="text-[15px] font-semibold tracking-tight text-white">
+              <Dialog.Title className="text-[15px] font-semibold tracking-tight text-ink-strong">
                 {editing ? `Edit ${editing.name}` : 'Add a model'}
               </Dialog.Title>
               <Dialog.Description className="mt-0.5 text-[13px] text-dim">
@@ -171,7 +171,7 @@ export function ModelFormDialog({
                   className={inputClass}
                 >
                   {PROVIDER_OPTIONS.map((option) => (
-                    <option key={option} value={option} className="bg-[#0a0d1c]">
+                    <option key={option} value={option} className="bg-void-900 text-ink-strong">
                       {option}
                     </option>
                   ))}

@@ -93,7 +93,7 @@ export function ComparisonDashboard({ runId }: ComparisonDashboardProps) {
         className="flex flex-wrap items-center justify-between gap-3"
       >
         <div className="min-w-0">
-          <h1 className="truncate text-[22px] font-semibold tracking-tight text-white">
+          <h1 className="truncate text-[22px] font-semibold tracking-tight text-ink-strong">
             {run?.title ?? 'Consensus run'}
           </h1>
           <p className="mt-0.5 text-[13px] text-dim">
@@ -135,11 +135,11 @@ export function ComparisonDashboard({ runId }: ComparisonDashboardProps) {
                         ? 'animate-pulse-ring bg-aurora-400'
                         : stage.status === 'failed'
                           ? 'bg-rose-400'
-                          : 'bg-white/25',
+                          : 'bg-marker-1',
                   )}
                 />
                 <span
-                  className={stage.status === 'pending' ? 'text-faint' : 'text-white/80'}
+                  className={stage.status === 'pending' ? 'text-faint' : 'text-ink-1'}
                 >
                   {stage.label}
                 </span>
@@ -194,7 +194,7 @@ export function ComparisonDashboard({ runId }: ComparisonDashboardProps) {
       </GlassCard>
 
       <section>
-        <h2 className="mb-3 text-[15px] font-semibold tracking-tight text-white">
+        <h2 className="mb-3 text-[15px] font-semibold tracking-tight text-ink-strong">
           Model Candidates
         </h2>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

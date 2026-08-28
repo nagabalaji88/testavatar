@@ -4,6 +4,7 @@ import { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
 import App from '@/App';
+import { ThemeProvider } from '@/lib/theme';
 import '@/index.css';
 
 // @monaco-editor/react defaults to fetching Monaco from a CDN at runtime;
@@ -26,6 +27,8 @@ if (!container) {
 
 createRoot(container).render(
   <StrictMode>
-    <App />
+    <ThemeProvider>
+      <App />
+    </ThemeProvider>
   </StrictMode>,
 );

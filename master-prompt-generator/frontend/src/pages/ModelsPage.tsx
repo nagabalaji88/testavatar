@@ -93,7 +93,7 @@ function RegistryTable() {
       {isLoading ? (
         <div className="animate-shimmer h-24 rounded-xl" />
       ) : models.length === 0 ? (
-        <p className="rounded-xl bg-white/[0.03] px-4 py-6 text-center text-[12.5px] text-faint ring-1 ring-inset ring-white/10">
+        <p className="rounded-xl bg-surface-1 px-4 py-6 text-center text-[12.5px] text-faint ring-1 ring-inset ring-line-2">
           No models yet. Add one, browse what your providers offer, or import a
           JSON file.
         </p>
@@ -121,13 +121,13 @@ function RegistryTable() {
                 <tr
                   key={model.id}
                   className={cn(
-                    'border-t border-white/6',
+                    'border-t border-line-1',
                     // Dimmed rather than hidden: a disabled model still has to
                     // be findable in order to be re-enabled.
                     !model.enabled && 'opacity-55',
                   )}
                 >
-                  <td className="py-2.5 pr-3 font-medium text-white/90">
+                  <td className="py-2.5 pr-3 font-medium text-ink-1">
                     {model.name}
                   </td>
                   <td className="py-2.5 pr-3 text-dim">{model.provider}</td>
@@ -158,7 +158,7 @@ function RegistryTable() {
                         toggle.mutate({ id: model.id, enabled })
                       }
                       aria-label={`Toggle ${model.name}`}
-                      className="relative h-5 w-9 rounded-full bg-white/12 outline-none transition data-[state=checked]:bg-aurora-500"
+                      className="relative h-5 w-9 rounded-full bg-track outline-none transition data-[state=checked]:bg-aurora-500"
                     >
                       <Switch.Thumb className="block size-4 translate-x-0.5 rounded-full bg-white transition-transform will-change-transform data-[state=checked]:translate-x-[18px]" />
                     </Switch.Root>
@@ -209,7 +209,7 @@ function RegistryTable() {
         editing={editing}
       />
 
-      <div className="mt-6 border-t border-white/6 pt-5">
+      <div className="mt-6 border-t border-line-1 pt-5">
         <RegistryImportExport registrySize={models.length} />
       </div>
     </div>
@@ -217,7 +217,7 @@ function RegistryTable() {
 }
 
 const TAB_TRIGGER =
-  'inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-[12.5px] font-medium text-dim ring-1 ring-inset ring-transparent transition hover:text-white data-[state=active]:bg-white/8 data-[state=active]:text-white data-[state=active]:ring-white/12';
+  'inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-[12.5px] font-medium text-dim ring-1 ring-inset ring-transparent transition hover:text-ink-strong data-[state=active]:bg-surface-3 data-[state=active]:text-ink-strong data-[state=active]:ring-line-2';
 
 export function ModelsPage() {
   return (
