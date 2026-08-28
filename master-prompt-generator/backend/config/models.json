@@ -57,7 +57,7 @@
       "id": "ollama-cloud-llama2",
       "name": "Llama 2 (Ollama Cloud)",
       "provider": "Ollama",
-      "model_key": "llama2",
+      "model_key": "openai/llama2",
       "max_tokens": 4096,
       "cost_per_1k_input": 0.0,
       "cost_per_1k_output": 0.0,
