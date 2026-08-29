@@ -114,6 +114,12 @@ export interface CredentialStatus {
   updated_at?: string | null;
   /** Enabled registry entries this one key would unblock. */
   model_count: number;
+  /**
+   * False for a variable a registry entry names through api_key_env: there is
+   * no family row to store a value against, so the environment is the only
+   * place it can be set.
+   */
+  editable: boolean;
 }
 
 export interface CredentialTestResult {

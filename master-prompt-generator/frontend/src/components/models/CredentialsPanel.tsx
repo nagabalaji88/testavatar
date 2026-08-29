@@ -74,7 +74,17 @@ function CredentialRow({
               {status.label}
             </span>
 
-            {status.needs_reentry ? (
+            {!status.editable ? (
+        <p className="mt-2.5 text-[11.5px] text-faint">
+          {status.configured
+            ? `Supplied by ${status.env_var} in your environment.`
+            : `Set ${status.env_var} in .env to enable this.`}{' '}
+          Models name their own variable, so this one is read here rather than
+          stored — edit .env and restart the stack to change it.
+        </p>
+      ) : null}
+
+      {status.needs_reentry ? (
               <Badge tone="danger">
                 <AlertTriangle className="size-3" />
                 re-enter
@@ -109,7 +119,9 @@ function CredentialRow({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {status.configured ? (
+          {/* The check is addressed by family, and these rows have none --
+              offering the button would only produce a 404. */}
+          {status.configured && status.editable ? (
             <Button
               size="sm"
               variant="ghost"
@@ -119,10 +131,12 @@ function CredentialRow({
               Test
             </Button>
           ) : null}
-          <Button size="sm" variant="ghost" onClick={() => setEditing((v) => !v)}>
-            {editing ? 'Cancel' : status.configured ? 'Replace' : 'Add key'}
-          </Button>
-          {status.source === 'database' ? (
+          {status.editable ? (
+            <Button size="sm" variant="ghost" onClick={() => setEditing((v) => !v)}>
+              {editing ? 'Cancel' : status.configured ? 'Replace' : 'Add key'}
+            </Button>
+          ) : null}
+          {status.editable && status.source === 'database' ? (
             <Button
               size="sm"
               variant="ghost"

@@ -343,6 +343,12 @@ class CredentialStatus(BaseModel):
     # it, which needs a re-entry rather than looking like an absent key.
     needs_reentry: bool = False
     updated_at: Optional[datetime] = None
+    # False for a variable a registry entry names through api_key_env. Those
+    # are addressed by variable name rather than by family, so there is no
+    # family row to store a key against -- the environment is the only place
+    # they can be set. Listed all the same, because an operator who exports one
+    # needs to see it here rather than infer it from the Models page.
+    editable: bool = True
     # How many enabled registry entries this key unblocks, so the UI can say
     # what setting it would actually achieve.
     model_count: int = 0

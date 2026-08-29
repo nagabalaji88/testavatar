@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from datetime import datetime, timezone
+from collections.abc import Sequence
 from typing import Annotated, Any, Optional
 
 from fastapi import (
@@ -915,6 +917,51 @@ def _credential_statuses(
                     and not p.api_key
                     and family.matches(p.provider)
                 ),
+            )
+        )
+
+    statuses.extend(_entry_credential_statuses(providers))
+    return statuses
+
+
+def _entry_credential_statuses(
+    providers: Sequence[ProviderConfig],
+) -> list[CredentialStatus]:
+    """Rows for variables named by a registry entry's api_key_env.
+
+    A hosted deployment of an open-weight model belongs to no family -- its
+    `provider` still reads "Ollama" -- so it names its own variable instead.
+    Nothing above describes those, which left an operator exporting
+    OLLAMA_CLOUD_API_KEY seeing no mention of it on this page while the Models
+    page showed the key as present: two screens disagreeing about one
+    credential, with the one they went to for keys being the wrong one.
+
+    Read-only by construction. There is no family to store a value against, so
+    the environment is the only place these can be set.
+    """
+    covered = {family.env_var for family in PROVIDER_FAMILIES}
+
+    grouped: dict[str, list[ProviderConfig]] = {}
+    for provider in providers:
+        variable = (provider.api_key_env or "").strip()
+        if variable and variable not in covered:
+            grouped.setdefault(variable, []).append(provider)
+
+    statuses: list[CredentialStatus] = []
+    for variable, entries in sorted(grouped.items()):
+        present = bool(os.environ.get(variable, "").strip())
+        # Name it after the provider when the entries agree, since that is what
+        # the operator recognises; the variable is shown beside it either way.
+        names = sorted({e.provider.strip() for e in entries if e.provider.strip()})
+        statuses.append(
+            CredentialStatus(
+                family=f"env:{variable}",
+                label=names[0] if len(names) == 1 else variable,
+                env_var=variable,
+                configured=present,
+                source="environment" if present else None,
+                editable=False,
+                model_count=sum(1 for e in entries if e.enabled),
             )
         )
     return statuses
