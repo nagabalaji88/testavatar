@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Debate — Home</title>
+<style>
+  /* Deliberately single-theme: this reproduces a light reference design, so
+     every colour is painted explicitly rather than inherited. */
+  :root {
+    --shell:      #E8E6E3;
+    --side:       #F7F5F2;
+    --side-line:  #E7E3DE;
+    --ink:        #16150F;
+    --ink-2:      #59564E;
+    --ink-3:      #8B877D;
+    --card:       #FFFFFF;
+    --line:       #EDE9E3;
+    --line-2:     #E2DDD5;
+    --blue:       #2563EB;
+    --blue-soft:  #EEF2FF;
+    --amber:      #F0801A;
+    --hint:       #F4F4F8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--shell);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    padding: 28px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .window {
+    width: 100%;
+    max-width: 1400px;
+    height: 1010px;
+    background: var(--card);
+    border-radius: 14px;
+    overflow: hidden;
+    display: flex;
+    box-shadow: 0 24px 70px rgba(30, 26, 20, .22), 0 2px 6px rgba(30, 26, 20, .10);
+  }
+
+  /* ---------------- sidebar ---------------- */
+  .side {
+    width: 266px;
+    flex: none;
+    background: var(--side);
+    border-right: 1px solid var(--side-line);
+    display: flex;
+    flex-direction: column;
+    padding: 18px 14px 14px;
+  }
+  .lights { display: flex; gap: 8px; padding: 0 6px 22px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; }
+
+  .srow {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 10px; border-radius: 8px;
+    font-size: 14.5px; color: var(--ink); cursor: default;
+  }
+  .srow svg { color: var(--ink-2); flex: none; }
+  .srow.accent svg { color: var(--amber); }
+  .srow.on { background: #FFFFFF; box-shadow: 0 1px 2px rgba(30,26,20,.07); }
+
+  .sgroup { display: flex; flex-direction: column; gap: 2px; }
+  .sdiv { height: 1px; background: var(--side-line); margin: 14px 8px; }
+
+  .slabel {
+    font-size: 11px; font-weight: 600; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--ink-3); padding: 0 10px 10px;
+  }
+  .recent { display: flex; flex-direction: column; gap: 14px; padding: 0 10px; overflow: hidden; }
+  .recent b { display: block; font-size: 14px; font-weight: 500; color: var(--ink); }
+  .recent span {
+    display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  .who {
+    margin-top: auto; display: flex; align-items: center; gap: 10px;
+    padding: 10px 6px 2px; border-top: 1px solid var(--side-line);
+  }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 50%; background: #23211C;
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 600; flex: none;
+  }
+  .who b { display: block; font-size: 14px; font-weight: 500; }
+  .who span { display: block; font-size: 12.5px; color: var(--ink-3); }
+
+  /* ---------------- main ---------------- */
+  .main {
+    flex: 1; min-width: 0; display: flex; flex-direction: column;
+    background:
+      radial-gradient(120% 90% at 50% 0%, #FBE6D8 0%, rgba(251,230,216,0) 55%),
+      radial-gradient(70% 60% at 0% 100%, #FBE1D2 0%, rgba(251,225,210,0) 60%),
+      radial-gradient(70% 60% at 100% 100%, #FCE8DA 0%, rgba(252,232,218,0) 60%),
+      #FDFCFA;
+  }
+  .topbar {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 22px; position: relative;
+  }
+  .topbar svg { color: var(--ink-3); }
+  .seg {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 2px; background: rgba(255,255,255,.55);
+    border-radius: 100px; padding: 3px;
+  }
+  .seg div {
+    font-size: 14px; font-weight: 500; color: var(--ink-3);
+    padding: 6px 18px; border-radius: 100px;
+  }
+  .seg div.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(30,26,20,.12); }
+
+  .stage { flex: 1; overflow-y: auto; padding: 30px 60px 44px; }
+  .center { max-width: 860px; margin: 0 auto; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 7px; background: #fff;
+    border-radius: 100px; padding: 8px 16px; font-size: 13.5px; font-weight: 600;
+    box-shadow: 0 1px 3px rgba(30,26,20,.10); margin: 0 auto;
+  }
+  .badge svg { color: var(--amber); }
+  .tagline { text-align: center; font-size: 14.5px; color: var(--ink-2); margin: 14px 0 0; }
+  h1 {
+    text-align: center; font-size: 56px; font-weight: 600; letter-spacing: -.035em;
+    margin: 22px 0 34px; line-height: 1.05;
+  }
+
+  /* composer */
+  .composer {
+    background: #fff; border-radius: 18px; padding: 20px 20px 14px;
+    box-shadow: 0 2px 5px rgba(30,26,20,.07), 0 12px 34px rgba(30,26,20,.07);
+  }
+  .composer .ph { font-size: 16.5px; color: #A9A49B; }
+  .crow { display: flex; align-items: center; gap: 18px; margin-top: 26px; }
+  .crow svg { color: #8D887F; }
+  .picker {
+    margin-left: auto; display: flex; align-items: center; gap: 6px;
+    font-size: 14px; color: var(--ink-2); font-weight: 500;
+  }
+  .send {
+    width: 34px; height: 34px; border-radius: 50%; background: #DEDAD3;
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .send svg { color: #fff; }
+
+  /* model picker */
+  .models {
+    background: #fff; border-radius: 18px; margin-top: 16px;
+    box-shadow: 0 2px 5px rgba(30,26,20,.07), 0 12px 34px rgba(30,26,20,.07);
+    overflow: hidden;
+  }
+  .mhead {
+    display: flex; align-items: center; gap: 12px;
+    padding: 18px 22px 14px;
+  }
+  .mhead b { font-size: 15px; font-weight: 600; }
+  .mhead .count { margin-left: auto; font-size: 13.5px; color: var(--ink-3); }
+  .cols { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); }
+  .col { padding: 4px 16px 18px; border-left: 1px solid var(--line); }
+  .col:first-child { border-left: 0; }
+  .chead { display: flex; align-items: center; gap: 9px; padding: 8px 0 14px; }
+  .chead b { font-size: 14px; font-weight: 600; }
+  .chead span { font-size: 13.5px; color: var(--ink-3); }
+  .logo { width: 21px; height: 21px; border-radius: 6px; display: flex; align-items: center;
+          justify-content: center; font-size: 10px; font-weight: 700; color: #fff; flex: none; }
+
+  .mrow { display: flex; align-items: center; gap: 9px; padding: 7px 0; font-size: 13.5px;
+          white-space: nowrap; }
+  .cb { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid #CFCAC2; flex: none;
+        display: flex; align-items: center; justify-content: center; background: #fff; }
+  .cb.on { background: var(--blue); border-color: var(--blue); }
+  .mrow.off { color: #ABA69D; }
+  .tag {
+    font-size: 10.5px; font-weight: 600; color: #4F46E5; background: var(--blue-soft);
+    border-radius: 5px; padding: 2px 6px;
+  }
+  .hint {
+    display: flex; align-items: center; gap: 9px; margin: 0 20px 18px;
+    background: var(--hint); border-radius: 10px; padding: 11px 14px;
+    font-size: 12.5px; color: var(--ink-2);
+  }
+  .hint svg { color: #9A95F0; flex: none; }
+
+  /* quick start */
+  .qlabel {
+    font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--ink-3); margin: 34px 0 14px;
+  }
+  .qgrid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+  .qcard {
+    background: #fff; border-radius: 14px; padding: 16px 18px;
+    display: flex; align-items: flex-start; gap: 14px;
+    box-shadow: 0 1px 3px rgba(30,26,20,.07);
+  }
+  .qicon { width: 34px; height: 34px; border-radius: 9px; flex: none;
+           display: flex; align-items: center; justify-content: center; }
+  .qcard b { font-size: 14.5px; font-weight: 600; display: block; }
+  .qcard p { margin: 4px 0 0; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+  .qcard .chev { margin-left: auto; color: #B6B1A8; flex: none; padding-top: 2px; }
+
+  @media (max-width: 1100px) {
+    body { padding: 0; }
+    .window { height: auto; border-radius: 0; flex-direction: column; }
+    .side { width: 100%; }
+    .cols { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .col:nth-child(3) { border-left: 0; }
+    .qgrid { grid-template-columns: 1fr; }
+    h1 { font-size: 38px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="window">
+
+  <!-- ============ sidebar ============ -->
+  <aside class="side">
+    <div class="lights">
+      <i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#28C840"></i>
+    </div>
+
+    <div class="sgroup">
+      <div class="srow accent">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        New debate
+      </div>
+      <div class="srow">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        Search
+      </div>
+      <div class="srow">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h13"/><circle cx="17" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="13" cy="12" r="2" fill="currentColor" stroke="none"/></svg>
+        Customize
+      </div>
+    </div>
+
+    <div class="sdiv"></div>
+
+    <div class="sgroup">
+      <div class="srow on">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 1 1-3.1-6.3L21 4v8h-8"/></svg>
+        Debates
+      </div>
+      <div class="srow">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        Prompts
+      </div>
+      <div class="srow">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>
+        Runs
+      </div>
+      <div class="srow">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M9 8V5h6v3M9 14h.01M15 14h.01"/></svg>
+        Models
+      </div>
+      <div class="srow">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="3.5"/><path d="M10.5 12.5L20 3M17 6l2.5 2.5"/></svg>
+        API keys
+      </div>
+    </div>
+
+    <div class="sdiv"></div>
+    <div class="slabel">Recents</div>
+    <div class="recent">
+      <div><b>Best database for enterprise…</b><span>Comparing PostgreSQL, MongoDB…</span></div>
+      <div><b>Should we migrate to .NET 10?</b><span>Multi-model debate · 3 models</span></div>
+      <div><b>Qdrant or pgvector?</b><span>1 dissent · Claude changed position</span></div>
+      <div><b>Managing AI cost implications</b><span>Consensus prompt · 68.2</span></div>
+      <div><b>Claims triage assistant</b><span>Prompt for adjusters · 4 models</span></div>
+    </div>
+
+    <div class="who">
+      <div class="avatar">N</div>
+      <div style="min-width:0">
+        <b>Nagabalaji</b><span>admin</span>
+      </div>
+      <svg style="margin-left:auto;color:#A9A49B" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10M8 11l4 4 4-4M5 19h14"/></svg>
+    </div>
+  </aside>
+
+  <!-- ============ main ============ -->
+  <main class="main">
+    <div class="topbar">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/></svg>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      <div class="seg">
+        <div class="on">Debate</div><div>Compare</div><div>Prompt</div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="center">
+
+        <div style="display:flex;justify-content:center">
+          <div class="badge">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9l-4.4 3.4 1.5 5.6L12 15l-4.6 3 1.5-5.6L4.5 9l5.6-1.4z"/></svg>
+            AI Debate
+          </div>
+        </div>
+        <p class="tagline">Multiple AI models. Better decisions.</p>
+        <h1>Good afternoon, Nagabalaji</h1>
+
+        <!-- composer -->
+        <div class="composer">
+          <div class="ph">What do you want to debate today?</div>
+          <div class="crow">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5l-8.5 8.5a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8"/></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+            <div class="picker">
+              Multiple models
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+            <div class="send">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- model picker -->
+        <div class="models">
+          <div class="mhead">
+            <b>Select AI models for the debate</b>
+            <span class="count">4 selected</span>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#8B877D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg>
+          </div>
+
+          <div class="cols">
+            <div class="col">
+              <div class="chead"><div class="logo" style="background:#0E9F80">OA</div><b>OpenAI</b><span>(2)</span></div>
+              <div class="mrow"><div class="cb on"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>GPT-4o <span class="tag">Latest</span></div>
+              <div class="mrow"><div class="cb on"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>GPT-4o mini</div>
+              <div class="mrow off"><div class="cb"></div>GPT-4.1</div>
+            </div>
+
+            <div class="col">
+              <div class="chead"><div class="logo" style="background:#C96442">AN</div><b>Anthropic</b><span>(1)</span></div>
+              <div class="mrow"><div class="cb on"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>Claude Sonnet <span class="tag">Latest</span></div>
+              <div class="mrow off"><div class="cb"></div>Claude Opus</div>
+            </div>
+
+            <div class="col">
+              <div class="chead"><div class="logo" style="background:#3B7DED">GO</div><b>Google</b><span>(1)</span></div>
+              <div class="mrow"><div class="cb on"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>Gemini 1.5 Pro <span class="tag">Latest</span></div>
+              <div class="mrow off"><div class="cb"></div>Gemini Flash</div>
+            </div>
+
+            <div class="col">
+              <div class="chead"><div class="logo" style="background:#5C5F66">OT</div><b>Others</b></div>
+              <div class="mrow off"><div class="cb"></div>Llama 2 · Ollama</div>
+              <div class="mrow off"><div class="cb"></div>Mistral Small</div>
+              <div class="mrow off"><div class="cb"></div>DeepSeek Chat</div>
+              <div class="mrow off"><div class="cb"></div>Qwen 2.5</div>
+            </div>
+          </div>
+
+          <div class="hint">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 1 3.6 10.8c-.6.5-.9 1.1-.9 1.7H9.3c0-.6-.3-1.2-.9-1.7A6 6 0 0 1 12 3z"/></svg>
+            You can select 2 to 6 models. More models means a richer debate — and a higher cost per run.
+          </div>
+        </div>
+
+        <!-- quick start -->
+        <div class="qlabel">Quick start</div>
+        <div class="qgrid">
+          <div class="qcard">
+            <div class="qicon" style="background:#EEF2FF">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg>
+            </div>
+            <div>
+              <b>Settle a technical decision</b>
+              <p>Should we move our vector store from Qdrant to pgvector?</p>
+            </div>
+            <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </div>
+
+          <div class="qcard">
+            <div class="qicon" style="background:#FEF2E7">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#D97317" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+            </div>
+            <div>
+              <b>Review a document</b>
+              <p>Have every model read it, then show me only where they disagreed.</p>
+            </div>
+            <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </div>
+
+          <div class="qcard">
+            <div class="qicon" style="background:#ECFDF5">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#0E9F80" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/></svg>
+            </div>
+            <div>
+              <b>Build a master prompt</b>
+              <p>Each model drafts one; the best sections are merged into a single prompt.</p>
+            </div>
+            <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </div>
+
+          <div class="qcard">
+            <div class="qicon" style="background:#F3F0FF">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#7C5CE0" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/></svg>
+            </div>
+            <div>
+              <b>Research a topic</b>
+              <p>Compare answers across models and surface the claims only one of them makes.</p>
+            </div>
+            <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+</div>
+
+</body>
+</html>
