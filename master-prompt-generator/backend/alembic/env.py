@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
+import sqlalchemy as sa
 from alembic import context
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -53,6 +54,66 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+# The first revision. A database carrying this schema is at this revision
+# whether or not anything ever recorded that.
+BASELINE_REVISION = "4e794452fecc"
+
+# Tables the pre-Alembic create_all path produced. Any one of them means the
+# database already holds the baseline schema.
+BASELINE_TABLES = frozenset(
+    {
+        "users",
+        "provider_credentials",
+        "prompt_runs",
+        "prompt_candidates",
+        "consensus_prompts",
+        "execution_logs",
+    }
+)
+
+
+def _adopt_pre_alembic_schema(connection: Connection) -> None:
+    """Record the baseline for a database that predates this environment.
+
+    Every schema created before the migration environment existed was built by
+    create_all, so it has all six tables and no alembic_version. Alembic reads
+    that as "no revision applied" and replays the baseline, whose first
+    statement is CREATE TABLE provider_credentials -- which fails on a database
+    that already has it, killing the container before the API ever starts.
+
+    Stamping is correct rather than merely convenient here: the baseline was
+    generated from these same models and verified to produce a schema identical
+    to create_all's, so a database built either way genuinely is at this
+    revision. Later revisions then apply on top normally.
+
+    Deliberately narrow: it does nothing when alembic_version already exists,
+    and nothing on an empty database, so the only case it touches is the one
+    that would otherwise crash.
+    """
+    inspector = sa.inspect(connection)
+    tables = set(inspector.get_table_names())
+
+    if "alembic_version" in tables:
+        return
+    if not (tables & BASELINE_TABLES):
+        return
+
+    # Alembic's own version table definition, created here rather than through
+    # the migration context so the stamp can be committed on its own before the
+    # migration run begins.
+    connection.execute(
+        sa.text(
+            "CREATE TABLE alembic_version ("
+            "version_num VARCHAR(32) NOT NULL, "
+            "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+        )
+    )
+    connection.execute(
+        sa.text("INSERT INTO alembic_version (version_num) VALUES (:rev)"),
+        {"rev": BASELINE_REVISION},
+    )
+
+
 def _run(connection: Connection) -> None:
     context.configure(
         connection=connection,
@@ -71,6 +132,11 @@ def _run(connection: Connection) -> None:
 async def _run_async() -> None:
     engine = create_async_engine(_url(), poolclass=None)
     async with engine.connect() as connection:
+        # Committed on its own, before the migration run: the stamp is a row,
+        # not DDL, so it would otherwise be discarded when the connection
+        # closes -- leaving the adoption to repeat on every start.
+        await connection.run_sync(_adopt_pre_alembic_schema)
+        await connection.commit()
         await connection.run_sync(_run)
     await engine.dispose()
 
