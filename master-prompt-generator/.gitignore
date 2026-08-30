@@ -15,11 +15,17 @@ dist/
 *.tsbuildinfo
 
 # Environment & secrets
-.env
-.env.local
+# Ignore every .env variant and name the two that are meant to be committed.
+# Listing .env and .env.local individually is what let .env.backup -- an
+# obvious name for a copy of a populated .env -- get committed.
+.env*
+!.env.example
+!.env.local.example
 *.pem
 
 # Runtime artefacts
 backend/config/models.json.tmp
+# Default SQLITE_DIRECTORY: a run's database, never part of the source tree.
+backend/data/
 *.log
 .DS_Store

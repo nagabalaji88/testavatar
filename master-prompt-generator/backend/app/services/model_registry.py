@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from typing import Optional
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -62,17 +63,34 @@ class ModelRegistry:
     API and Celery workers may both mutate the registry.
     """
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(self, path: Optional[Path] = None) -> None:
         self._path = Path(path or settings.model_config_path)
         self._lock = threading.RLock()
-        self._registry: ProviderRegistryConfig | None = None
+        self._registry: Optional[ProviderRegistryConfig] = None
+        self._stamp: Optional[tuple[int, int]] = None
 
     # -- loading -----------------------------------------------------------
 
+    def _file_stamp(self) -> Optional[tuple[int, int]]:
+        """(mtime_ns, size) of the spec file, or None when it is absent."""
+        try:
+            stat = self._path.stat()
+        except OSError:
+            return None
+        return (stat.st_mtime_ns, stat.st_size)
+
     def load(self, *, force: bool = False) -> ProviderRegistryConfig:
         with self._lock:
-            if self._registry is not None and not force:
+            stamp = self._file_stamp()
+            # The API and the Celery worker are separate processes sharing this
+            # file. Caching on first read alone meant a model added through the
+            # API was offered by the UI and then rejected by the worker, whose
+            # own cache predated it -- UnknownProviderError on a model the user
+            # had just been shown. Re-reading when the file changes is what
+            # makes an edit take effect everywhere without a restart.
+            if self._registry is not None and not force and stamp == self._stamp:
                 return self._registry
+            self._stamp = stamp
 
             if not self._path.exists():
                 logger.warning(
@@ -110,12 +128,38 @@ class ModelRegistry:
                 return provider
         raise UnknownProviderError(provider_id)
 
-    def resolve(self, provider_ids: list[str] | None) -> list[ProviderConfig]:
-        """Resolve a requested selection, defaulting to every enabled provider."""
+    def resolve(self, provider_ids: Optional[list[str]]) -> list[ProviderConfig]:
+        """Resolve a requested selection, defaulting to every credentialed provider.
+
+        Enabled-but-uncredentialed entries are dropped from the *default* fan-out
+        rather than dispatched: every one of them costs the full retry ladder
+        before failing, and a run whose models all lack keys dies several
+        seconds in with a wall of provider exceptions instead of saying which
+        credential is missing. An explicit selection is still honoured as
+        given, so an operator can always force a model and see its real error.
+        """
+        from app.services.llm_service import requires_credential
+
         if not provider_ids:
-            selected = self.enabled()
-            if not selected:
+            enabled = self.enabled()
+            if not enabled:
                 raise UnknownProviderError("no enabled providers are configured")
+            selected = [p for p in enabled if not requires_credential(p)]
+            if not selected:
+                raise UnknownProviderError(
+                    "every enabled provider is missing its credential: "
+                    + ", ".join(
+                        f"{p.id} (set {p.api_key_env})"
+                        if p.api_key_env
+                        else f"{p.id} ({p.provider})"
+                        for p in enabled
+                    )
+                )
+            if skipped := [p.id for p in enabled if requires_credential(p)]:
+                logger.warning(
+                    "providers_skipped_missing_credential",
+                    extra={"skipped": skipped},
+                )
             return selected
 
         resolved: list[ProviderConfig] = []
@@ -146,6 +190,52 @@ class ModelRegistry:
             provider = self.get(provider_id).model_copy(update={"enabled": enabled})
             return self.upsert(provider)
 
+    def import_providers(
+        self, incoming: list[ProviderConfig], *, replace: bool
+    ) -> tuple[list[str], list[str]]:
+        """Apply a supplied model list wholesale. Returns (added, updated) ids.
+
+        `replace` swaps the catalogue for exactly what was supplied; otherwise
+        the incoming entries are merged over the existing ones by id. Merge is
+        the default at the API because replace silently drops working models
+        that the uploaded file happens not to mention.
+
+        The whole batch is written in one _persist, so a file that fails
+        validation leaves the registry exactly as it was rather than half
+        applied.
+        """
+        with self._lock:
+            registry = self.load()
+            existing = {p.id: p for p in registry.providers}
+
+            added = [p.id for p in incoming if p.id not in existing]
+            updated = [p.id for p in incoming if p.id in existing]
+
+            if replace:
+                providers = list(incoming)
+            else:
+                merged = dict(existing)
+                for provider in incoming:
+                    merged[provider.id] = provider
+                # Existing order first, so a merge does not reshuffle the
+                # registry page on every import.
+                providers = [merged[pid] for pid in existing if pid in merged]
+                providers += [p for p in incoming if p.id not in existing]
+
+            self._persist(
+                ProviderRegistryConfig(version=registry.version, providers=providers)
+            )
+            logger.info(
+                "model_registry_imported",
+                extra={
+                    "mode": "replace" if replace else "merge",
+                    "added": len(added),
+                    "updated": len(updated),
+                    "total": len(providers),
+                },
+            )
+            return added, updated
+
     def delete(self, provider_id: str) -> None:
         with self._lock:
             registry = self.load()
@@ -165,6 +255,10 @@ class ModelRegistry:
         )
         tmp_path.replace(self._path)
         self._registry = registry
+        # Recorded after the write so the stamp matches what is now on disk;
+        # taken before it, the next load() would see a mismatch and re-read the
+        # file we just wrote.
+        self._stamp = self._file_stamp()
         logger.info(
             "model_registry_persisted", extra={"providers": len(registry.providers)}
         )

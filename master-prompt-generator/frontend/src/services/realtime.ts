@@ -19,12 +19,32 @@ interface RunStreamHandlers {
 const MAX_RETRIES = 6;
 const BASE_DELAY_MS = 800;
 
-function socketUrl(runId: string): string {
-  const token = tokenStore.access() ?? '';
-  const base = API_BASE.startsWith('http')
+function wsBase(): string {
+  return API_BASE.startsWith('http')
     ? API_BASE.replace(/^http/, 'ws')
     : `${window.location.origin.replace(/^http/, 'ws')}${API_BASE}`;
-  return `${base}/runs/${runId}/stream?token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * Trade the access token for a single-use ticket scoped to this run.
+ *
+ * A handshake cannot carry an Authorization header, so whatever authenticates
+ * the socket ends up in the URL — and URLs reach proxy logs, access logs and
+ * browser history. The exchange happens over a normal request, where the
+ * header works, so only the narrow credential is ever written to a URL. A
+ * fresh one is fetched per connect, including every reconnect, because the
+ * server burns each ticket on use.
+ */
+async function fetchTicket(runId: string): Promise<string> {
+  const response = await fetch(`${API_BASE}/runs/${runId}/stream-ticket`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokenStore.access() ?? ''}` },
+  });
+  if (!response.ok) {
+    throw new Error(`ticket request failed: ${response.status}`);
+  }
+  const body = (await response.json()) as { ticket: string };
+  return body.ticket;
 }
 
 export class RunStream {
@@ -41,8 +61,24 @@ export class RunStream {
   connect(): void {
     if (this.disposed) return;
     this.handlers.onStateChange?.('connecting');
+    void this.openSocket();
+  }
 
-    const socket = new WebSocket(socketUrl(this.runId));
+  private async openSocket(): Promise<void> {
+    let ticket: string;
+    try {
+      ticket = await fetchTicket(this.runId);
+    } catch {
+      // Treat a failed exchange like a dropped socket so the same backoff
+      // applies -- a ticket request can fail for the same transient reasons.
+      this.scheduleRetry();
+      return;
+    }
+    if (this.disposed) return;
+
+    const socket = new WebSocket(
+      `${wsBase()}/runs/${this.runId}/stream?ticket=${encodeURIComponent(ticket)}`,
+    );
     this.socket = socket;
 
     socket.onopen = () => {
@@ -68,14 +104,18 @@ export class RunStream {
         this.handlers.onStateChange?.('closed');
         return;
       }
-      if (this.retries >= MAX_RETRIES) {
-        this.handlers.onStateChange?.('closed');
-        return;
-      }
-      const delay = BASE_DELAY_MS * 2 ** this.retries;
-      this.retries += 1;
-      this.timer = window.setTimeout(() => this.connect(), delay);
+      this.scheduleRetry();
     };
+  }
+
+  private scheduleRetry(): void {
+    if (this.disposed || this.retries >= MAX_RETRIES) {
+      this.handlers.onStateChange?.('closed');
+      return;
+    }
+    const delay = BASE_DELAY_MS * 2 ** this.retries;
+    this.retries += 1;
+    this.timer = window.setTimeout(() => this.connect(), delay);
   }
 
   close(): void {

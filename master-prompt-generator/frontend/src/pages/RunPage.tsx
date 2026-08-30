@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import { ComparisonDashboard } from '@/components/dashboard/ComparisonDashboard';
+import { RunWorkspace } from '@/components/dashboard/RunWorkspace';
 import { Button } from '@/components/ui/Button';
 
 export function RunPage() {
@@ -25,7 +25,7 @@ export function RunPage() {
           All runs
         </Link>
       </Button>
-      <ComparisonDashboard runId={runId} />
+      <RunWorkspace runId={runId} />
     </div>
   );
 }

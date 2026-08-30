@@ -96,7 +96,7 @@ export const useRunStore = create<RunState>((set, get) => ({
   error: null,
 
   attach: (run) =>
-    set({
+    set((state) => ({
       runId: run.id,
       run,
       status: run.status,
@@ -105,7 +105,18 @@ export const useRunStore = create<RunState>((set, get) => ({
         run.candidates.map((candidate) => [candidate.model_id, candidate]),
       ),
       error: run.error,
-    }),
+      // Stage state arrives on the websocket, so a run opened after it
+      // finished has none: every stage sits at "pending" forever and the UI
+      // reports a completed run as nought stages done. A completed run
+      // completed all of them -- that is implied by the status, not invented
+      // -- so say so. Durations stay unset, because those really are unknown
+      // without the event history, and a failed run is left alone since where
+      // it stopped is exactly what we cannot infer.
+      stages:
+        run.status === 'completed' && state.stages.every((s) => s.status === 'pending')
+          ? state.stages.map((stage) => ({ ...stage, status: 'done' as const }))
+          : state.stages,
+    })),
 
   reset: (runId) =>
     set({
@@ -226,6 +237,8 @@ export const useRunStore = create<RunState>((set, get) => ({
           section_provenance:
             (payload.section_provenance as ConsensusPrompt['section_provenance']) ?? [],
           conflicts: (payload.conflicts as ConsensusPrompt['conflicts']) ?? [],
+          reinforcements:
+            (payload.reinforcements as ConsensusPrompt['reinforcements']) ?? [],
           optimization_report:
             (payload.optimization_report as ConsensusPrompt['optimization_report']) ??
             null,

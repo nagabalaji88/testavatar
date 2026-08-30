@@ -12,11 +12,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Iterable, Sequence, TypeVar
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Iterable,
+    Optional,
+    Sequence,
+    TypeVar,
+    Union,
+)
 
 import litellm
 from litellm.exceptions import (
@@ -25,6 +35,7 @@ from litellm.exceptions import (
     AuthenticationError,
     BadRequestError,
     ContextWindowExceededError,
+    InternalServerError,
     RateLimitError,
     ServiceUnavailableError,
     Timeout,
@@ -32,8 +43,15 @@ from litellm.exceptions import (
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.pinned_transport import build_pinned_client
+from app.core.provider_families import (
+    ProviderFamily,
+    family_for,
+    is_local_provider,
+)
 from app.core.telemetry import LLM_CALLS, LLM_COST, LLM_LATENCY, LLM_TOKENS, span
 from app.models.schemas import ProviderConfig
+from app.services.credential_store import credential_store
 
 logger = get_logger(__name__)
 
@@ -41,11 +59,28 @@ litellm.drop_params = True
 litellm.set_verbose = False
 litellm.suppress_debug_info = True
 
+# Every outbound provider call goes through a transport that resolves the
+# hostname, validates the answers and then connects to the address it just
+# checked. Validating api_base when it is saved cannot cover this on its own:
+# a registry entry outlives its validation by days, so a name accepted while
+# it pointed somewhere harmless can be repointed afterwards without any race
+# at all. See app/core/pinned_transport.
+litellm.aclient_session = build_pinned_client()
+
 RETRYABLE: tuple[type[Exception], ...] = (
     RateLimitError,
     ServiceUnavailableError,
     APIConnectionError,
     Timeout,
+    # litellm.exceptions.InternalServerError subclasses openai.APIError, not
+    # litellm's own APIError below -- a completely separate hierarchy, so it
+    # was previously caught by nothing here and crashed straight through any
+    # bare call. A provider's transient 500 is as retryable as a 503; this is
+    # what a fan-out-isolated candidate failure turned into an unhandled crash
+    # of the whole run when it happened during analysis, judging, or the
+    # consensus polish pass, none of which go through fan_out()'s per-provider
+    # try/except.
+    InternalServerError,
 )
 FATAL: tuple[type[Exception], ...] = (
     AuthenticationError,
@@ -67,7 +102,7 @@ class LLMError(RuntimeError):
         self.retryable = retryable
 
 
-@dataclass(slots=True)
+@dataclass
 class LLMResult:
     model_id: str
     model_name: str
@@ -78,7 +113,7 @@ class LLMResult:
     cost_usd: float
     latency_ms: int
     attempts: int
-    finish_reason: str | None = None
+    finish_reason: Optional[str] = None
     raw_metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -86,7 +121,7 @@ class LLMResult:
         return self.input_tokens + self.output_tokens
 
 
-@dataclass(slots=True)
+@dataclass
 class LLMFailure:
     model_id: str
     model_name: str
@@ -96,14 +131,131 @@ class LLMFailure:
     latency_ms: int
 
 
-def _api_key_for(provider: ProviderConfig) -> str | None:
-    mapping = {
-        "openai": settings.openai_api_key,
-        "anthropic": settings.anthropic_api_key,
-        "google": settings.gemini_api_key,
-        "gemini": settings.gemini_api_key,
-    }
-    return mapping.get(provider.provider.strip().lower())
+def _settings_key_for(family: ProviderFamily) -> Optional[str]:
+    value = getattr(settings, family.settings_attr, None)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _api_key_for(provider: ProviderConfig) -> Optional[str]:
+    """Resolve a provider's credential, most specific source first.
+
+    A per-entry key beats anything per-family, so two registry entries pointing
+    at the same family (a shared gateway and a dedicated deployment, say) can
+    authenticate independently.
+
+    Between the two per-family sources, the database wins over the environment.
+    That ordering is the point of storing them at all: a key an admin has just
+    typed into the UI has to take effect, and if a stale environment variable
+    outranked it the edit would silently do nothing. Which source answered is
+    reported by credential_source() so the precedence is never a guess.
+    """
+    if provider.api_key_env:
+        # An empty or unset variable is a missing credential, not the empty
+        # string: passing "" to litellm reads as "no auth" on some providers
+        # and as a malformed header on others, both of which fail further
+        # downstream with a much worse error than requires_credential's.
+        if key := os.environ.get(provider.api_key_env, "").strip():
+            return key
+        logger.warning(
+            "provider_api_key_env_unset",
+            extra={"model_id": provider.id, "api_key_env": provider.api_key_env},
+        )
+        return None
+    if provider.api_key:
+        return provider.api_key
+
+    family = family_for(provider.provider)
+    if family is None:
+        return None
+    if stored := credential_store.get(family.name):
+        return stored
+    return _settings_key_for(family)
+
+
+def credential_env_var(provider: ProviderConfig) -> Optional[str]:
+    """Name the environment variable this entry's credential comes from.
+
+    The name, never the value. None means no variable applies -- a local
+    runtime that takes no credential, or an entry carrying an inline key.
+    """
+    if provider.api_key_env:
+        return provider.api_key_env
+    if provider.api_key:
+        return None
+    family = family_for(provider.provider)
+    return family.env_var if family else None
+
+
+def credential_family(provider: ProviderConfig) -> Optional[str]:
+    """The credential family this entry authenticates against, if any.
+
+    Lets the UI point a keyless model at the one field that would fix it,
+    instead of asking the operator to work out which family it belongs to.
+    """
+    if provider.api_key_env or provider.api_key:
+        return None
+    family = family_for(provider.provider)
+    return family.name if family else None
+
+
+def credential_source(provider: ProviderConfig) -> Optional[str]:
+    """Which of the four sources actually supplies this entry's key.
+
+    Mirrors _api_key_for's precedence exactly. Shown in the UI because "the
+    key is set" is not actionable on its own once there are two places it could
+    have come from: an operator editing the wrong one sees no effect and has no
+    way to tell why.
+    """
+    if provider.api_key_env:
+        return "entry_env" if os.environ.get(provider.api_key_env, "").strip() else None
+    if provider.api_key:
+        return "entry_inline"
+
+    family = family_for(provider.provider)
+    if family is None:
+        return None
+    if credential_store.get(family.name):
+        return "database"
+    return "environment" if _settings_key_for(family) else None
+
+
+def is_local_runtime(provider: ProviderConfig) -> bool:
+    """True for a model served from your own hardware, which needs no key."""
+    if provider.api_key_env or provider.api_key:
+        # A hosted deployment of an open-weight model still reads "Ollama" in
+        # `provider`; declaring a credential is what distinguishes it.
+        return False
+    return is_local_provider(provider.provider)
+
+
+def _api_base_for(provider: ProviderConfig) -> Optional[str]:
+    """Resolve the endpoint, defaulting local runtimes to their configured host.
+
+    An explicit api_base in the registry always wins, so a single models.json
+    can be pointed at a remote GPU box without touching code.
+    """
+    if provider.api_base:
+        return provider.api_base
+
+    name = provider.provider.strip().lower()
+    if name == "ollama":
+        return settings.ollama_base_url
+    if name in {"vllm", "llamacpp", "llama.cpp", "lmstudio", "local"}:
+        return settings.vllm_base_url
+    return None
+
+
+def requires_credential(provider: ProviderConfig) -> bool:
+    """True when the provider needs an API key that is not currently set."""
+    # A hosted deployment of an open-weight model is only recognisable by the
+    # fact that the entry declares a credential source: `provider` still reads
+    # "Ollama", which would otherwise take the key-free path below and let a
+    # run start against an endpoint that answers 401 on every call.
+    if provider.api_key_env or provider.api_key:
+        return _api_key_for(provider) is None
+    if is_local_provider(provider.provider):
+        return False
+    return _api_key_for(provider) is None
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
@@ -168,7 +320,7 @@ def estimate_tokens(text: str) -> int:
 class LLMService:
     """Async facade over LiteLLM with retries, metrics and concurrency control."""
 
-    def __init__(self, max_parallel: int | None = None) -> None:
+    def __init__(self, max_parallel: Optional[int] = None) -> None:
         self._semaphore = asyncio.Semaphore(
             max_parallel or settings.max_parallel_generations
         )
@@ -180,10 +332,10 @@ class LLMService:
         system_prompt: str,
         user_prompt: str,
         phase: str,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
         json_mode: bool = False,
-        timeout: int | None = None,
+        timeout: Optional[int] = None,
     ) -> LLMResult:
         """Invoke a provider once, retrying transient failures."""
         messages = [
@@ -201,13 +353,13 @@ class LLMService:
         }
         if api_key := _api_key_for(provider):
             request["api_key"] = api_key
-        if provider.api_base:
-            request["api_base"] = provider.api_base
+        if api_base := _api_base_for(provider):
+            request["api_base"] = api_base
         if json_mode and provider.supports_json_mode:
             request["response_format"] = {"type": "json_object"}
 
         started = time.perf_counter()
-        last_error: Exception | None = None
+        last_error: Optional[Exception] = None
 
         async with self._semaphore:
             with span(
@@ -338,8 +490,8 @@ class LLMService:
         system_prompt: str,
         user_prompt: str,
         phase: str,
-        max_tokens: int | None = None,
-        timeout: int | None = None,
+        max_tokens: Optional[int] = None,
+        timeout: Optional[int] = None,
     ) -> tuple[dict[str, Any], LLMResult]:
         """Call a provider and parse a JSON object out of the response.
 
@@ -398,13 +550,13 @@ class LLMService:
         *,
         build_messages: Callable[[ProviderConfig], tuple[str, str]],
         phase: str,
-        on_start: Callable[[ProviderConfig], Awaitable[None]] | None = None,
-        on_success: Callable[[LLMResult], Awaitable[None]] | None = None,
-        on_failure: Callable[[LLMFailure], Awaitable[None]] | None = None,
+        on_start: Optional[Callable[[ProviderConfig], Awaitable[None]]] = None,
+        on_success: Optional[Callable[[LLMResult], Awaitable[None]]] = None,
+        on_failure: Optional[Callable[[LLMFailure], Awaitable[None]]] = None,
     ) -> tuple[list[LLMResult], list[LLMFailure]]:
         """Execute providers concurrently, isolating per-provider failures."""
 
-        async def _run(provider: ProviderConfig) -> LLMResult | LLMFailure:
+        async def _run(provider: ProviderConfig) -> Union[LLMResult, LLMFailure]:
             if on_start is not None:
                 await on_start(provider)
             system_prompt, user_prompt = build_messages(provider)

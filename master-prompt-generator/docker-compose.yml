@@ -9,13 +9,45 @@ x-backend-env: &backend-env
   QDRANT_URL: http://qdrant:6333
   JWT_SECRET_KEY: ${JWT_SECRET_KEY:-please-change-this-secret}
   CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8080}
+  # Defaults true so a fresh local stack can bootstrap its first admin. Any
+  # ENVIRONMENT other than "local" refuses to start until this is false, so it
+  # has to be settable from here -- without it a production compose deploy
+  # would be unbootable with no way to satisfy the guard.
+  ALLOW_OPEN_REGISTRATION: ${ALLOW_OPEN_REGISTRATION:-true}
+  # Applied by the api service only -- see the RUN_MIGRATIONS override there.
+  # Two containers running `alembic upgrade head` at once race on the version
+  # table, so the worker inherits this as false.
+  RUN_MIGRATIONS: "false"
+  # Per-registry-entry credential for a hosted open-weight deployment; the
+  # models.json entry names this variable via api_key_env.
+  OLLAMA_CLOUD_API_KEY: ${OLLAMA_CLOUD_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GROQ_API_KEY: ${GROQ_API_KEY:-}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
+  # Open-source stack. Point MODEL_CONFIG_PATH at models.local.json (see the
+  # `local` profile) to run entirely on open-weight models with no API keys.
+  MODEL_CONFIG_PATH: ${MODEL_CONFIG_PATH:-/srv/config/models.json}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+  ANALYZER_MODEL_ID: ${ANALYZER_MODEL_ID:-openai-gpt4o}
+  JUDGE_MODEL_ID: ${JUDGE_MODEL_ID:-anthropic-claude-sonnet}
+  CONSENSUS_MODEL_ID: ${CONSENSUS_MODEL_ID:-anthropic-claude-sonnet}
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+  EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+  GENERATION_TIMEOUT_SECONDS: ${GENERATION_TIMEOUT_SECONDS:-180}
+  JUDGE_TIMEOUT_SECONDS: ${JUDGE_TIMEOUT_SECONDS:-120}
+  MAX_PARALLEL_GENERATIONS: ${MAX_PARALLEL_GENERATIONS:-8}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   OTEL_ENABLED: ${OTEL_ENABLED:-false}
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
 
+# Infrastructure ports bind to 127.0.0.1 by default: published on 0.0.0.0 they
+# put PostgreSQL, Redis and Qdrant -- none of which authenticate meaningfully
+# here -- on any interface the host has. Only the frontend is exposed. Override
+# with BIND_ADDRESS=0.0.0.0 only behind a firewall you control.
 services:
   postgres:
     image: postgres:16-alpine
@@ -27,7 +59,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      - '${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432'
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-mpg} -d ${POSTGRES_DB:-mpg}']
       interval: 10s
@@ -41,7 +73,7 @@ services:
     volumes:
       - redis-data:/data
     ports:
-      - '${REDIS_PORT:-6379}:6379'
+      - '${BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379'
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
@@ -56,20 +88,69 @@ services:
     volumes:
       - qdrant-data:/qdrant/storage
     ports:
-      - '${QDRANT_PORT:-6333}:6333'
+      - '${BIND_ADDRESS:-127.0.0.1}:${QDRANT_PORT:-6333}:6333'
+
+  # --- Open-source inference (profile: local) -----------------------------
+  # Serves open-weight models from your own hardware. No API key, no per-token
+  # cost. Started only with `--profile local`, because the images and model
+  # weights are several GB and are pure waste for an API-key deployment.
+  ollama:
+    image: ollama/ollama:0.5.4
+    profiles: ['local']
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-10m}
+      # Serialised by default: three 7B models answering at once will thrash a
+      # machine without a GPU. Raise it if you have the VRAM.
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-3}
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - '${BIND_ADDRESS:-127.0.0.1}:${OLLAMA_PORT:-11434}:11434'
+    healthcheck:
+      test: ['CMD-SHELL', 'ollama list >/dev/null 2>&1 || exit 1']
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # One-shot: pulls the weights the local registry references, then exits.
+  ollama-pull:
+    image: ollama/ollama:0.5.4
+    profiles: ['local']
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -e
+        for model in ${OLLAMA_MODELS:-qwen2.5:7b-instruct llama3.1:8b-instruct-q4_K_M mistral:7b-instruct nomic-embed-text}; do
+          echo "pulling $$model"
+          ollama pull "$$model"
+        done
+        echo "all models ready"
+    restart: 'no'
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      # The API is the one service that migrates. The worker starts from the
+      # same image and would race it on the version table.
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
     volumes:
       # Providers are configured declaratively; mounting the file lets operators
       # add models without rebuilding the image.
       - ./backend/config:/srv/config
     ports:
-      - '${BACKEND_PORT:-8000}:8000'
+      - '${BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-8000}:8000'
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,6 +173,14 @@ services:
       - --concurrency=${CELERY_CONCURRENCY:-4}
       - --without-gossip
       - --without-mingle
+    # SIGTERM starts a Celery warm shutdown, which waits for the task in
+    # flight. Docker's default grace is 10s, so a redeploy used to SIGKILL
+    # mid-run. Because task_acks_late is on, the killed task is redelivered
+    # rather than lost -- but a prompt run is redelivered by re-issuing every
+    # model call, so the cost is paid twice. 60s covers a normal run without
+    # making a deploy wait out the 18-minute soft time limit; anything still
+    # running past it is killed and retried as before.
+    stop_grace_period: 60s
     environment: *backend-env
     volumes:
       - ./backend/config:/srv/config
@@ -127,3 +216,4 @@ volumes:
   postgres-data:
   redis-data:
   qdrant-data:
+  ollama-models:

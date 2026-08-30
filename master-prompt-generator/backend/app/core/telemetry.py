@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any, Iterator, Optional
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
@@ -41,7 +41,7 @@ STAGE_LATENCY = Histogram(
     buckets=(0.1, 0.5, 1, 5, 10, 30, 60, 120, 300),
 )
 
-_tracer: trace.Tracer | None = None
+_tracer: Optional[trace.Tracer] = None
 
 
 def configure_telemetry() -> None:

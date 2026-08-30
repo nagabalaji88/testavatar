@@ -17,8 +17,15 @@ RUN pip install --upgrade pip && pip install -r Requirements.txt
 
 COPY app ./app
 COPY config ./config
+# The migration environment ships with the image so any container built from
+# it can apply the schema -- a release job, an init container, or the API's
+# own entrypoint.
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
+COPY entrypoint.sh ./entrypoint.sh
 
-RUN useradd --create-home --uid 10001 mpg && chown -R mpg:mpg /srv
+RUN chmod +x ./entrypoint.sh \
+    && useradd --create-home --uid 10001 mpg && chown -R mpg:mpg /srv
 USER mpg
 
 EXPOSE 8000
@@ -26,4 +33,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
     CMD curl -fsS http://localhost:8000/health || exit 1
 
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

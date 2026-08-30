@@ -8,7 +8,7 @@ is logged rather than raised.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Optional, Sequence
 
 import litellm
 from qdrant_client import AsyncQdrantClient, models as qmodels
@@ -19,17 +19,39 @@ from app.models.schemas import SemanticSearchHit
 
 logger = get_logger(__name__)
 
+# Providers cap how many inputs one embedding request may carry; 96 sits under
+# every limit the supported providers impose.
+_EMBED_BATCH = 96
 
-def _embedding_api_key() -> str | None:
-    return settings.openai_api_key
+
+def _embedding_request() -> Optional[dict[str, Any]]:
+    """Build the LiteLLM kwargs for the configured embedding backend.
+
+    Returns None when embeddings are unavailable, which disables semantic
+    search without affecting the generation pipeline.
+    """
+    provider = settings.embedding_provider
+    if provider == "disabled":
+        return None
+
+    if provider == "ollama":
+        # Fully local and key-free; the model must be pulled on the Ollama host.
+        return {
+            "model": settings.embedding_model,
+            "api_base": settings.ollama_base_url,
+        }
+
+    if not settings.openai_api_key:
+        return None
+    return {"model": settings.embedding_model, "api_key": settings.openai_api_key}
 
 
 class VectorService:
     def __init__(self) -> None:
-        self._client: AsyncQdrantClient | None = None
+        self._client: Optional[AsyncQdrantClient] = None
         self._ready = False
 
-    async def client(self) -> AsyncQdrantClient | None:
+    async def client(self) -> Optional[AsyncQdrantClient]:
         if self._client is None:
             try:
                 self._client = AsyncQdrantClient(
@@ -69,19 +91,53 @@ class VectorService:
             logger.warning("qdrant_ensure_collection_failed", extra={"error": str(exc)})
             return False
 
-    async def embed(self, text: str) -> list[float] | None:
-        if not _embedding_api_key():
+    async def embed(self, text: str) -> Optional[list[float]]:
+        request = _embedding_request()
+        if request is None:
             return None
         try:
-            response = await litellm.aembedding(
-                model=settings.embedding_model,
-                input=[text[:8000]],
-                api_key=_embedding_api_key(),
-            )
+            response = await litellm.aembedding(input=[text[:8000]], **request)
             return list(response["data"][0]["embedding"])
         except Exception as exc:
             logger.warning("embedding_failed", extra={"error": str(exc)})
             return None
+
+    async def embed_many(self, texts: Sequence[str]) -> Optional[list[list[float]]]:
+        """Embed a batch in as few round-trips as the provider allows.
+
+        The merge needs a vector for every directive in the fan-out -- a couple
+        of hundred short strings. One call per directive would make the round
+        trips, not the tokens, the dominant cost; batching keeps the whole
+        thing to a handful of requests.
+
+        All-or-nothing on purpose: a partial result would silently leave some
+        directives compared semantically and others lexically, which is harder
+        to reason about than falling back cleanly for the whole run.
+        """
+        request = _embedding_request()
+        if request is None or not texts:
+            return None
+
+        vectors: list[list[float]] = []
+        try:
+            for start in range(0, len(texts), _EMBED_BATCH):
+                chunk = [text[:8000] for text in texts[start : start + _EMBED_BATCH]]
+                response = await litellm.aembedding(input=chunk, **request)
+                # Providers are not required to preserve input order, and the
+                # caller keys results positionally, so sort by the index the
+                # response carries rather than trusting arrival order.
+                ordered = sorted(response["data"], key=lambda item: item["index"])
+                if len(ordered) != len(chunk):
+                    logger.warning(
+                        "embedding_batch_incomplete",
+                        extra={"expected": len(chunk), "received": len(ordered)},
+                    )
+                    return None
+                vectors.extend(list(item["embedding"]) for item in ordered)
+        except Exception as exc:
+            logger.warning("embedding_batch_failed", extra={"error": str(exc)})
+            return None
+        return vectors
 
     async def index_prompt(
         self,
@@ -90,8 +146,9 @@ class VectorService:
         title: str,
         target_domain: str,
         content: str,
-        score: float | None,
-    ) -> str | None:
+        score: Optional[float],
+        owner_id: Optional[str] = None,
+    ) -> Optional[str]:
         if not await self.ensure_collection():
             return None
         vector = await self.embed(f"{title}\n{target_domain}\n{content}")
@@ -109,6 +166,12 @@ class VectorService:
             "target_domain": target_domain,
             "score": score,
             "excerpt": content[:600],
+            # Carried so search can filter on it. A point written before this
+            # field existed has no owner and is unreachable by any non-admin
+            # search -- deliberately: the alternative is defaulting it to
+            # something that matches, which would serve exactly the prompts
+            # whose ownership is unknown.
+            "owner_id": owner_id,
         }
         try:
             await client.upsert(
@@ -123,8 +186,22 @@ class VectorService:
             return None
 
     async def search(
-        self, query: str, limit: int = 10, min_score: float = 0.0
+        self,
+        query: str,
+        limit: int = 10,
+        min_score: float = 0.0,
+        *,
+        owner_id: Optional[str],
+        include_all_owners: bool = False,
     ) -> list[SemanticSearchHit]:
+        """Search indexed prompts, restricted to one owner unless told otherwise.
+
+        owner_id is keyword-only and has no default: the collection spans every
+        tenant, so a caller that forgets to scope its search would otherwise
+        return other people's prompt content. Admins pass
+        include_all_owners=True to search the whole collection, mirroring the
+        admin branch in list_runs.
+        """
         if not await self.ensure_collection():
             return []
         vector = await self.embed(query)
@@ -132,12 +209,26 @@ class VectorService:
         if vector is None or client is None:
             return []
 
+        query_filter = None
+        if not include_all_owners:
+            if not owner_id:
+                return []
+            query_filter = qmodels.Filter(
+                must=[
+                    qmodels.FieldCondition(
+                        key="owner_id",
+                        match=qmodels.MatchValue(value=owner_id),
+                    )
+                ]
+            )
+
         try:
             hits = await client.search(
                 collection_name=settings.qdrant_collection,
                 query_vector=vector,
                 limit=limit,
                 score_threshold=min_score or None,
+                query_filter=query_filter,
             )
         except Exception as exc:
             logger.warning("qdrant_search_failed", extra={"error": str(exc)})

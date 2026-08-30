@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Debate — Live Run</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+  /* Deliberately single-theme: this reproduces a light reference design, so
+     every colour is painted explicitly rather than inherited. */
+  :root {
+    --page:     #F7F8FD;
+    --card:     #FFFFFF;
+    --line:     #E8EAF3;
+    --line-2:   #EFF1F8;
+    --ink:      #171A2B;
+    --ink-2:    #5A6076;
+    --ink-3:    #8A90A6;
+    --navy:     #1B2244;
+    --navy-2:   #262E55;
+    --indigo:   #4F46E5;
+    --indigo-s: #EEF0FE;
+    --green:    #16A06A;
+    --green-s:  #E7F7F0;
+    --amber:    #D97317;
+    --amber-s:  #FDF1E5;
+    --blue-s:   #EAF1FE;
+    --blue:     #2563EB;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page); color: var(--ink);
+    font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; display: flex; min-height: 100vh;
+  }
+
+  /* ---------------- sidebar ---------------- */
+  .side {
+    width: 258px; flex: none; background: var(--navy); color: #fff;
+    display: flex; flex-direction: column; padding: 22px 16px 18px;
+  }
+  .brand { display: flex; align-items: center; gap: 11px; padding: 0 8px 28px; }
+  .brand svg { color: #7C8CFF; }
+  .brand b { font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
+
+  .nav { display: flex; flex-direction: column; gap: 4px; }
+  .nav a {
+    display: flex; align-items: center; gap: 13px; padding: 11px 13px;
+    border-radius: 10px; font-size: 14.5px; font-weight: 500;
+    color: #B4BBD6; text-decoration: none;
+  }
+  .nav a.on { background: var(--navy-2); color: #fff; font-weight: 600; }
+  .nav a.on svg { color: #8C9BFF; }
+
+  .suser {
+    margin-top: auto; display: flex; align-items: center; gap: 11px;
+    padding: 14px 8px 0; border-top: 1px solid rgba(255,255,255,.09);
+  }
+  .suser .av {
+    width: 36px; height: 36px; border-radius: 50%; background: #38406B; flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700;
+  }
+  .suser b { display: block; font-size: 14px; font-weight: 600; }
+  .suser span { display: block; font-size: 12px; color: #99A0BF; }
+
+  /* ---------------- main ---------------- */
+  .main { flex: 1; min-width: 0; padding: 26px 30px 40px; }
+
+  .phead { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 22px; }
+  .phead h1 { font-size: 28px; font-weight: 800; letter-spacing: -.03em; margin: 0; }
+  .phead p { margin: 5px 0 0; font-size: 14.5px; color: var(--ink-2); }
+  .pills { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line);
+    background: #fff; border-radius: 100px; padding: 7px 14px; font-size: 13px; font-weight: 600;
+  }
+  .pill i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .muted { font-size: 13px; color: var(--ink-3); }
+  .dots {
+    width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line);
+    background: #fff; display: flex; align-items: center; justify-content: center; color: var(--ink-3);
+  }
+
+  .cols { display: grid; grid-template-columns: minmax(0,1fr) 320px; gap: 20px; align-items: start; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
+  .card + .card { margin-top: 20px; }
+  .pad { padding: 22px 24px; }
+
+  .chead { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .chead .ic {
+    width: 28px; height: 28px; border-radius: 8px; background: var(--indigo-s);
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .chead b { font-size: 15.5px; font-weight: 700; }
+
+  .qbox {
+    border: 1px solid var(--line); border-radius: 12px; padding: 15px 17px;
+    font-size: 15.5px; line-height: 1.55; position: relative; min-height: 74px;
+  }
+  .qbox .count { position: absolute; right: 14px; bottom: 9px; font-size: 12px; color: var(--ink-3); }
+
+  .sub { font-size: 14.5px; font-weight: 700; margin: 20px 0 11px; }
+  .chips { display: flex; flex-wrap: wrap; align-items: center; gap: 11px; }
+  .chip {
+    display: flex; align-items: center; gap: 10px; border: 1px solid var(--line);
+    border-radius: 11px; padding: 9px 13px; background: #fff;
+  }
+  .chip .lg { width: 26px; height: 26px; border-radius: 8px; flex: none; color: #fff;
+              display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; }
+  .chip b { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.25; }
+  .chip span { display: block; font-size: 11.5px; color: var(--ink-3); }
+  .chip .x { color: #B9BFD2; margin-left: 4px; }
+  .editbtn {
+    margin-left: auto; background: var(--indigo-s); color: var(--indigo);
+    border-radius: 10px; padding: 10px 22px; font-size: 14px; font-weight: 700;
+  }
+
+  /* stepper */
+  .steps { display: flex; align-items: center; gap: 0; padding: 20px 24px 0; }
+  .step { display: flex; align-items: center; gap: 9px; }
+  .step .n {
+    width: 26px; height: 26px; border-radius: 50%; flex: none; font-size: 12.5px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    background: #EDEFF7; color: var(--ink-3);
+  }
+  .step.done .n { background: var(--indigo); color: #fff; }
+  .step.now  .n { background: #fff; color: var(--indigo); border: 2px solid var(--indigo); }
+  .step b { font-size: 13.5px; font-weight: 600; color: var(--ink-3); }
+  .step.done b, .step.now b { color: var(--ink); }
+  .step.now b { color: var(--indigo); }
+  .bar { flex: 1; height: 2px; background: #E7EAF4; margin: 0 12px; }
+  .bar.done { background: var(--indigo); }
+
+  /* live debate */
+  .live { display: flex; align-items: center; gap: 11px; padding: 22px 24px 4px; }
+  .live .ic { width: 30px; height: 30px; border-radius: 9px; background: var(--indigo-s);
+              display: flex; align-items: center; justify-content: center; flex: none; }
+  .live b { font-size: 15.5px; font-weight: 700; display: block; }
+  .live p { margin: 2px 0 0; font-size: 13.5px; color: var(--ink-2); }
+  .round {
+    margin-left: auto; background: var(--indigo-s); color: var(--indigo);
+    border-radius: 100px; padding: 6px 14px; font-size: 12.5px; font-weight: 700;
+  }
+
+  .thread { position: relative; padding: 18px 24px 22px 24px; }
+  .thread::before {
+    content: ""; position: absolute; left: 30px; top: 26px; bottom: 78px;
+    width: 2px; background: #E9ECF6;
+  }
+  .msg { position: relative; display: flex; gap: 14px; margin-bottom: 14px; }
+  .msg .node {
+    position: absolute; left: 26px; top: 22px; width: 10px; height: 10px; border-radius: 50%;
+    background: #fff; border: 2px solid #D3D8EA;
+  }
+  .msg .av {
+    width: 40px; height: 40px; border-radius: 12px; flex: none; margin-left: 32px;
+    display: flex; align-items: center; justify-content: center; color: #fff;
+    font-size: 12px; font-weight: 700;
+  }
+  .body {
+    flex: 1; min-width: 0; background: #FBFCFE; border: 1px solid var(--line-2);
+    border-radius: 13px; padding: 13px 16px;
+  }
+  .brow { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .brow b { font-size: 14.5px; font-weight: 700; }
+  .role {
+    font-size: 11.5px; font-weight: 700; border-radius: 6px; padding: 3px 8px;
+  }
+  .time { margin-left: auto; font-size: 12px; color: var(--ink-3); }
+  .state {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700;
+    border-radius: 100px; padding: 4px 10px;
+  }
+  .body p { margin: 0; font-size: 14.5px; line-height: 1.62; color: var(--ink-2); }
+
+  .progress {
+    display: flex; align-items: center; gap: 13px; margin: 4px 0 0 72px;
+    background: #FBFCFE; border: 1px dashed #DDE2F0; border-radius: 13px; padding: 14px 16px;
+  }
+  .progress .ic { width: 30px; height: 30px; border-radius: 9px; background: var(--indigo-s);
+                  display: flex; align-items: center; justify-content: center; flex: none; }
+  .progress b { font-size: 13.5px; font-weight: 600; color: var(--ink-2); display: block; }
+  .track { height: 5px; border-radius: 3px; background: #E7EAF4; margin-top: 8px; overflow: hidden; }
+  .track i { display: block; height: 100%; background: var(--indigo); border-radius: 3px; }
+
+  /* right rail */
+  .rail .card { padding: 20px 22px; }
+  .rail h4 { margin: 0 0 16px; font-size: 15px; font-weight: 700; }
+  .donutrow { display: flex; align-items: center; gap: 18px; }
+  .checks { flex: 1; display: flex; flex-direction: column; gap: 11px; }
+  .check { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+  .check .b { width: 17px; height: 17px; border-radius: 50%; flex: none;
+              display: flex; align-items: center; justify-content: center; background: #E7EAF4; }
+  .check.done .b { background: var(--indigo); }
+  .check.now .b { background: #fff; border: 2px solid var(--indigo); }
+  .check span { color: var(--ink-3); }
+  .check.done span, .check.now span { color: var(--ink); font-weight: 600; }
+  .check em { margin-left: auto; font-style: normal; font-size: 12.5px; color: var(--ink-3); }
+
+  .mstat { display: flex; align-items: center; gap: 11px; padding: 9px 0; }
+  .mstat + .mstat { border-top: 1px solid var(--line-2); }
+  .mstat .lg { width: 30px; height: 30px; border-radius: 9px; flex: none; color: #fff;
+               display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 700; }
+  .mstat b { font-size: 13.5px; font-weight: 600; }
+  .mstat .s { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; }
+  .mstat .s i { width: 6px; height: 6px; border-radius: 50%; }
+
+  .empty { text-align: center; padding: 8px 0 4px; }
+  .empty .sp {
+    width: 52px; height: 52px; border-radius: 15px; background: var(--indigo-s);
+    display: flex; align-items: center; justify-content: center; margin: 0 auto 14px;
+  }
+  .empty p { margin: 0; font-size: 13px; color: var(--ink-3); line-height: 1.6; }
+  .empty .h { font-size: 15px; font-weight: 700; color: var(--ink); }
+  .empty .h span { font-weight: 500; color: var(--ink-3); font-size: 12.5px; }
+
+  .short { display: flex; align-items: center; gap: 11px; padding: 9px 0; font-size: 13.5px; color: var(--ink-2); }
+  .short svg { color: var(--ink-3); flex: none; }
+
+  @media (max-width: 1180px) {
+    body { flex-direction: column; }
+    .side { width: 100%; }
+    .cols { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ sidebar ============ -->
+<aside class="side">
+  <div class="brand">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9l-4.4 3.4 1.5 5.6L12 15l-4.6 3 1.5-5.6L4.5 9l5.6-1.4z"/></svg>
+    <b>Consensus</b>
+  </div>
+  <nav class="nav">
+    <a class="on" href="#0">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      New debate
+    </a>
+    <a href="#0">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg>
+      My runs
+    </a>
+    <a href="#0">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+      Prompts
+    </a>
+    <a href="#0">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M9 8V5h6v3"/></svg>
+      Models &amp; keys
+    </a>
+    <a href="#0">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7.9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H2a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 3.7 7.9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V2a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H22a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.1 2.7z"/></svg>
+      Settings
+    </a>
+  </nav>
+  <div class="suser">
+    <div class="av">NB</div>
+    <div style="min-width:0"><b>Nagabalaji</b><span>admin</span></div>
+    <svg style="margin-left:auto;color:#8C93B4" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12H4M8 8l-4 4 4 4M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/></svg>
+  </div>
+</aside>
+
+<!-- ============ main ============ -->
+<main class="main">
+
+  <div class="phead">
+    <div>
+      <h1>AI Debate</h1>
+      <p>Multiple AI models. Different perspectives. A better answer.</p>
+    </div>
+    <div class="pills">
+      <span class="pill"><i style="background:var(--indigo)"></i>Run #7f3a2c</span>
+      <span class="pill"><i style="background:var(--green)"></i>In progress</span>
+      <span class="muted">Started 2:34 PM</span>
+      <span class="dots">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>
+      </span>
+    </div>
+  </div>
+
+  <div class="cols">
+
+    <!-- ---------- left column ---------- -->
+    <div>
+
+      <div class="card pad">
+        <div class="chead">
+          <span class="ic">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.6 2.6 0 1 1 3.4 2.5c-.6.2-.9.8-.9 1.4v.4M12 17h.01"/></svg>
+          </span>
+          <b>Question</b>
+        </div>
+        <div class="qbox">
+          Should we move our vector store from Qdrant to pgvector?
+          <span class="count">61/1000</span>
+        </div>
+
+        <div class="sub">Selected models (3)</div>
+        <div class="chips">
+          <div class="chip"><span class="lg" style="background:#0E9F80">OA</span><div><b>GPT-4o</b><span>OpenAI</span></div>
+            <svg class="x" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+          <div class="chip"><span class="lg" style="background:#C96442">AN</span><div><b>Claude Sonnet</b><span>Anthropic</span></div>
+            <svg class="x" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+          <div class="chip"><span class="lg" style="background:#3B7DED">GO</span><div><b>Gemini 1.5 Pro</b><span>Google</span></div>
+            <svg class="x" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+          <div class="editbtn">Edit</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="steps">
+          <div class="step done"><span class="n">1</span><b>Analyze</b></div>
+          <div class="bar done"></div>
+          <div class="step now"><span class="n">2</span><b>Generate</b></div>
+          <div class="bar"></div>
+          <div class="step"><span class="n">3</span><b>Evaluate</b></div>
+          <div class="bar"></div>
+          <div class="step"><span class="n">4</span><b>Synthesize</b></div>
+          <div class="bar"></div>
+          <div class="step"><span class="n">5</span><b>Finalize</b></div>
+        </div>
+
+        <div class="live">
+          <span class="ic">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" stroke-width="2" stroke-linecap="round"><path d="M5 10v4M9 7v10M13 5v14M17 9v6M21 11v2"/></svg>
+          </span>
+          <div>
+            <b>Live debate</b>
+            <p>Models are analyzing, challenging and refining their responses.</p>
+          </div>
+          <span class="round">Round 1 of 2</span>
+        </div>
+
+        <div class="thread">
+
+          <div class="msg">
+            <span class="node"></span>
+            <span class="av" style="background:#0E9F80">OA</span>
+            <div class="body">
+              <div class="brow">
+                <b>GPT-4o</b>
+                <span class="role" style="background:var(--blue-s);color:var(--blue)">Architect</span>
+                <span class="time">2:35 PM</span>
+              </div>
+              <p style="margin-bottom:8px">Keep Qdrant. Payload filtering on every owner-scoped query is the workload pgvector handles worst, and you are already relying on it in the hot path.</p>
+              <span class="state" style="background:var(--green-s);color:var(--green)">Completed</span>
+            </div>
+          </div>
+
+          <div class="msg">
+            <span class="node"></span>
+            <span class="av" style="background:#C96442">AN</span>
+            <div class="body">
+              <div class="brow">
+                <b>Claude Sonnet</b>
+                <span class="role" style="background:var(--amber-s);color:var(--amber)">Devil's advocate</span>
+                <span class="time">2:36 PM</span>
+              </div>
+              <p style="margin-bottom:8px">I partly agree, but operational simplicity is not free either. One database is one fewer thing to run, back up and secure — measure recall under filters before ruling it out.</p>
+              <span class="state" style="background:var(--green-s);color:var(--green)">Completed</span>
+            </div>
+          </div>
+
+          <div class="msg">
+            <span class="node"></span>
+            <span class="av" style="background:#3B7DED">GO</span>
+            <div class="body">
+              <div class="brow">
+                <b>Gemini 1.5 Pro</b>
+                <span class="role" style="background:#F1EDFE;color:#7C5CE0">Researcher</span>
+                <span class="time">2:37 PM</span>
+              </div>
+              <p style="margin-bottom:8px">The decision depends on collection size and whether filters stay on the hot path. Under a million vectors with filters off the critical path, pgvector is defensible.</p>
+              <span class="state" style="background:var(--blue-s);color:var(--blue)">Thinking…</span>
+            </div>
+          </div>
+
+          <div class="progress">
+            <span class="ic">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3.2-6.9"/><path d="M8 12h8M12 8v8"/></svg>
+            </span>
+            <div style="flex:1">
+              <b>Round 1 complete. Moving to round 2: cross-examination…</b>
+              <div class="track"><i style="width:42%"></i></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- right rail ---------- -->
+    <div class="rail">
+
+      <div class="card">
+        <h4>Debate progress</h4>
+        <div class="donutrow">
+          <svg width="84" height="84" viewBox="0 0 84 84" role="img" aria-label="40 percent complete">
+            <circle cx="42" cy="42" r="34" fill="none" stroke="#E7EAF4" stroke-width="9"/>
+            <circle cx="42" cy="42" r="34" fill="none" stroke="#4F46E5" stroke-width="9"
+                    stroke-linecap="round" stroke-dasharray="85 214" transform="rotate(-90 42 42)"/>
+            <text x="42" y="47" text-anchor="middle" font-size="17" font-weight="700" fill="#171A2B"
+                  font-family="Plus Jakarta Sans, sans-serif">40%</text>
+          </svg>
+          <div class="checks">
+            <div class="check done"><span class="b"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span><span>Analyze</span><em>3/3</em></div>
+            <div class="check now"><span class="b"></span><span>Generate</span><em>3/3</em></div>
+            <div class="check"><span class="b"></span><span>Evaluate</span><em>0/3</em></div>
+            <div class="check"><span class="b"></span><span>Synthesize</span><em>0/3</em></div>
+            <div class="check"><span class="b"></span><span>Finalize</span><em>0/1</em></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Model status</h4>
+        <div class="mstat"><span class="lg" style="background:#0E9F80">OA</span><b>GPT-4o</b>
+          <span class="s" style="color:var(--green)"><i style="background:currentColor"></i>Completed</span></div>
+        <div class="mstat"><span class="lg" style="background:#C96442">AN</span><b>Claude Sonnet</b>
+          <span class="s" style="color:var(--green)"><i style="background:currentColor"></i>Completed</span></div>
+        <div class="mstat"><span class="lg" style="background:#3B7DED">GO</span><b>Gemini 1.5 Pro</b>
+          <span class="s" style="color:var(--blue)"><i style="background:currentColor"></i>Thinking</span></div>
+      </div>
+
+      <div class="card">
+        <h4 style="margin-bottom:12px">Final answer <span style="font-weight:500;color:var(--ink-3);font-size:12.5px">(not yet available)</span></h4>
+        <div class="empty">
+          <div class="sp">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="#4F46E5"><path d="M12 2l1.9 5.6L19.5 9l-4.4 3.4 1.5 5.6L12 15l-4.6 3 1.5-5.6L4.5 9l5.6-1.4z"/></svg>
+          </div>
+          <p>The final answer appears once every round is complete.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4>Shortcuts</h4>
+        <div class="short">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+          View raw logs
+        </div>
+        <div class="short">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M8 12l4 4 4-4M5 20h14"/></svg>
+          Download report
+        </div>
+        <div class="short">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.4 10.8l7.2-4.2M8.4 13.2l7.2 4.2"/></svg>
+          Share run
+        </div>
+      </div>
+
+    </div>
+  </div>
+</main>
+
+</body>
+</html>

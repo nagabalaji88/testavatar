@@ -26,7 +26,7 @@ function Tile({ label, value, hint, icon, delay }: TileProps) {
         </span>
         <span className="text-aurora-300">{icon}</span>
       </div>
-      <p className="mt-2 font-mono text-[22px] font-semibold leading-none tabular-nums text-white">
+      <p className="mt-2 font-mono text-[22px] font-semibold leading-none tabular-nums text-ink-strong">
         {value}
       </p>
       {hint ? <p className="mt-1.5 text-[11px] text-dim">{hint}</p> : null}

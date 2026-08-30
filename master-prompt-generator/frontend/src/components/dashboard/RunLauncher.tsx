@@ -1,15 +1,14 @@
 import { useMemo, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Rocket, X } from 'lucide-react';
 import type { ProviderConfig, RunAccepted, RunCreatePayload } from '@/types';
 import { GlassCard, SectionHeader } from '@/components/ui/GlassCard';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { inputClass } from '@/components/ui/Field';
 import { api, ApiError } from '@/services/api';
 import { cn } from '@/lib/utils';
-
-const inputClass =
-  'w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2.5 text-[13px] text-white placeholder:text-white/30 outline-none transition focus:border-aurora-400/60 focus:bg-white/[0.07]';
 
 function TagInput({
   label,
@@ -59,7 +58,7 @@ function TagInput({
               <button
                 type="button"
                 onClick={() => onChange(values.filter((item) => item !== value))}
-                className="inline-flex items-center gap-1.5 rounded-full bg-white/8 px-2.5 py-1 text-[11px] text-white/80 ring-1 ring-inset ring-white/12 transition hover:bg-white/12"
+                className="inline-flex items-center gap-1.5 rounded-full bg-surface-3 px-2.5 py-1 text-[11px] text-ink-1 ring-1 ring-inset ring-line-2 transition hover:bg-surface-4"
               >
                 {value}
                 <X className="size-3" />
@@ -80,7 +79,11 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
   const [outputFormat, setOutputFormat] = useState('markdown');
   const [constraints, setConstraints] = useState<string[]>([]);
   const [requirements, setRequirements] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
+  // null means "untouched", which is what makes every usable model the default
+  // selection. An empty array is a deliberate empty selection and must stay
+  // empty: treating both as "nothing chosen" meant deselecting the last model
+  // silently re-selected all of them.
+  const [selected, setSelected] = useState<string[] | null>(null);
 
   const { data: models = [] } = useQuery<ProviderConfig[]>({
     queryKey: ['models'],
@@ -90,12 +93,32 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
 
   const enabled = useMemo(() => models.filter((model) => model.enabled), [models]);
 
+  // A model without a credential is dispatched, fails its whole retry ladder
+  // and is dropped from the run — so offering it as a choice is offering
+  // something that cannot happen. Local runtimes need no key and are always
+  // available.
+  const usable = useMemo(
+    () => enabled.filter((model) => model.credential_available),
+    [enabled],
+  );
+  const blocked = useMemo(
+    () => enabled.filter((model) => !model.credential_available),
+    [enabled],
+  );
+
   const mutation = useMutation({
     mutationFn: (payload: RunCreatePayload) => api.createRun(payload),
     onSuccess: onLaunched,
   });
 
-  const chosen = selected.length ? selected : enabled.map((model) => model.id);
+  const usableIds = useMemo(() => usable.map((model) => model.id), [usable]);
+  // An explicit selection is filtered against what is currently usable: a
+  // model can lose its key, or be disabled or deleted from the models page,
+  // while it still sits in this component's state.
+  const chosen = useMemo(
+    () => (selected === null ? usableIds : selected.filter((id) => usableIds.includes(id))),
+    [selected, usableIds],
+  );
   const valid = title.trim().length >= 3 && businessProblem.trim().length >= 20 && targetDomain.trim().length >= 2;
 
   const submit = (event: FormEvent) => {
@@ -204,7 +227,7 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
               className={inputClass}
             >
               {['markdown', 'json', 'xml', 'yaml'].map((format) => (
-                <option key={format} value={format} className="bg-[#0a0d1c]">
+                <option key={format} value={format} className="bg-void-900 text-ink-strong">
                   {format}
                 </option>
               ))}
@@ -232,7 +255,7 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
             Models ({chosen.length} selected)
           </span>
           <div className="flex flex-wrap gap-2">
-            {enabled.map((model) => {
+            {usable.map((model) => {
               const active = chosen.includes(model.id);
               return (
                 <button
@@ -249,21 +272,70 @@ export function RunLauncher({ onLaunched }: { onLaunched: (run: RunAccepted) => 
                   className={cn(
                     'rounded-xl px-3 py-2 text-[12px] ring-1 ring-inset transition',
                     active
-                      ? 'bg-aurora-500/20 text-white ring-aurora-400/45'
-                      : 'bg-white/[0.04] text-dim ring-white/10 hover:bg-white/8',
+                      ? 'bg-aurora-500/20 text-accent-ink ring-aurora-400/45'
+                      : 'bg-surface-1 text-dim ring-line-2 hover:bg-surface-3',
                   )}
                 >
                   {model.name}
-                  <span className="ml-2 text-faint">{model.provider}</span>
+                  <span className="ml-2 text-faint">
+                    {model.is_local_runtime ? 'local' : model.provider}
+                  </span>
                 </button>
               );
             })}
-            {!enabled.length ? (
+            {!usable.length ? (
               <p className="text-[12px] text-faint">
-                No providers are enabled — add one in the model registry.
+                {enabled.length ? (
+                  <>
+                    No enabled model has a usable key.{' '}
+                    <Link to="/models" className="text-aurora-300 hover:text-aurora-200">
+                      Add one on the models page
+                    </Link>{' '}
+                    — it applies immediately.
+                  </>
+                ) : (
+                  <>
+                    No providers are enabled.{' '}
+                    <Link to="/models" className="text-aurora-300 hover:text-aurora-200">
+                      Add a model
+                    </Link>{' '}
+                    to get started.
+                  </>
+                )}
               </p>
             ) : null}
           </div>
+
+          {blocked.length ? (
+            <div className="mt-3 rounded-xl bg-surface-1 px-3 py-2.5 ring-1 ring-inset ring-line-2">
+              <p className="mb-1.5 text-[12px] font-medium text-dim">
+                Needs a key before it can be selected
+              </p>
+              <ul className="space-y-1">
+                {blocked.map((model) => (
+                  <li
+                    key={model.id}
+                    className="flex flex-wrap items-baseline gap-x-2 text-[12px] text-faint"
+                  >
+                    <span>{model.name}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>
+                      needs{' '}
+                      <code className="rounded bg-surface-3 px-1 py-0.5 font-mono text-[11px] text-dim">
+                        {model.credential_env_var ?? 'an API key'}
+                      </code>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <Link
+                to="/models"
+                className="mt-2 inline-block text-[12px] text-aurora-300 transition hover:text-aurora-200"
+              >
+                Set provider keys →
+              </Link>
+            </div>
+          ) : null}
         </div>
 
         {mutation.isError ? (

@@ -14,7 +14,7 @@ from app.models.domain import ConsensusPrompt, PromptRun
 from app.models.schemas import ExportFormat
 
 
-@dataclass(slots=True)
+@dataclass
 class ExportArtifact:
     filename: str
     media_type: str
@@ -42,6 +42,7 @@ def _payload(
         document["metrics"] = consensus.metrics
         document["section_provenance"] = consensus.section_provenance
         document["conflicts"] = consensus.conflicts
+        document["reinforcements"] = consensus.reinforcements
         document["optimization_report"] = consensus.optimization_report
     return document
 
@@ -178,6 +179,19 @@ def export_consensus(
             sections += [
                 f"- **[{item.get('kind')}] {item.get('section')}** — {item.get('resolution')}"
                 for item in consensus.conflicts
+            ]
+
+        if consensus.reinforcements:
+            sections += [
+                "",
+                "## Engine Reinforcements",
+                "",
+                "Directives added because no candidate model supplied them:",
+                "",
+            ]
+            sections += [
+                f"- **{item.get('section')}** — {item.get('rationale')}"
+                for item in consensus.reinforcements
             ]
 
     return ExportArtifact(

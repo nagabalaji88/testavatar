@@ -7,7 +7,7 @@ style it handles best.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from app.core.logging import get_logger
 from app.models.schemas import (
@@ -183,12 +183,12 @@ def heuristic_analysis(request: RunCreate) -> RequirementAnalysis:
 class RequirementAnalyzer:
     """Produces the requirement specification and the per-model seed prompts."""
 
-    def __init__(self, service: LLMService | None = None) -> None:
+    def __init__(self, service: Optional[LLMService] = None) -> None:
         self._llm = service or llm_service
 
     async def analyze(
         self, request: RunCreate
-    ) -> tuple[RequirementAnalysis, LLMResult | None]:
+    ) -> tuple[RequirementAnalysis, Optional[LLMResult]]:
         from app.core.config import settings
 
         brief = build_brief(request)
@@ -215,6 +215,7 @@ class RequirementAnalyzer:
                 system_prompt=ANALYZER_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 phase="analysis",
+                max_tokens=settings.analysis_max_tokens,
             )
         except (LLMError, ValueError) as exc:
             logger.warning(

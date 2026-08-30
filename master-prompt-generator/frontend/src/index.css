@@ -5,25 +5,51 @@
 /* Spatial glassmorphism: deep field, translucent strata, soft light.   */
 /* ------------------------------------------------------------------ */
 @theme {
-  --color-void-950: #05060f;
-  --color-void-900: #0a0d1c;
-  --color-void-800: #111528;
-  --color-void-700: #1a2038;
+  /* Theme-aware aliases. Defined as var() references so a utility built
+     from them re-resolves when the theme changes, rather than baking in
+     whichever palette compiled first. */
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+  --color-line-1: var(--line-1);
+  --color-line-2: var(--line-2);
+  --color-line-3: var(--line-3);
+  --color-ink-strong: var(--ink-strong);
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-marker-1: var(--marker-1);
+  --color-marker-2: var(--marker-2);
+  --color-track: var(--track);
+  --color-accent-ink: var(--accent-ink);
+  --color-scrim: var(--scrim);
 
-  --color-aurora-300: #8eb0ff;
-  --color-aurora-400: #5985ff;
-  --color-aurora-500: #3560ff;
-  --color-aurora-600: #1f3ef5;
+  --color-void-950: var(--void-950);
+  --color-void-900: var(--void-900);
+  --color-void-800: var(--void-800);
+  --color-void-700: var(--void-700);
 
-  --color-plasma-400: #b07bff;
-  --color-plasma-500: #8f4dff;
+  /* Hues. The dark values are the brand palette as designed; the light
+     values are the same hues re-derived past 4.5:1 on a pale field --
+     #3ddbb0 reads about 1.9:1 on white, fine as a glow and unreadable as
+     text, and every one of these is used as text somewhere. */
+  --color-aurora-200: var(--aurora-200);
+  --color-aurora-300: var(--aurora-300);
+  --color-aurora-400: var(--aurora-400);
+  --color-aurora-500: var(--aurora-500);
+  --color-aurora-600: var(--aurora-600);
 
-  --color-mint-400: #3ddbb0;
-  --color-amber-400: #ffb547;
-  --color-rose-400: #ff6b8a;
+  --color-plasma-400: var(--plasma-400);
+  --color-plasma-500: var(--plasma-500);
 
-  --color-glass-line: rgba(255, 255, 255, 0.12);
-  --color-glass-line-strong: rgba(255, 255, 255, 0.22);
+  --color-mint-400: var(--mint-400);
+  --color-amber-400: var(--amber-400);
+  --color-rose-400: var(--rose-400);
+
+  --color-glass-line: var(--line-2);
+  --color-glass-line-strong: var(--line-3);
 
   --radius-glass: 22px;
   --blur-glass: 26px;
@@ -33,6 +59,256 @@
 
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/* ------------------------------------------------------------------ */
+/* Theme                                                               */
+/*                                                                     */
+/* The identity is glassmorphism: translucent strata lifted off a      */
+/* field. Dark builds those strata from WHITE at low alpha; light      */
+/* inverts the overlay to INK at low alpha and lightens the field.     */
+/* The metaphor, the blur and the radial glows are unchanged -- only   */
+/* what the glass is tinted with.                                      */
+/*                                                                     */
+/* Three viewer states, not two: an explicit choice stamps             */
+/* data-theme on <html>; "follow system" stamps nothing and leaves     */
+/* prefers-color-scheme to decide. Light is the bare :root default so  */
+/* the un-stamped document is always readable.                         */
+/* ------------------------------------------------------------------ */
+:root {
+  color-scheme: light;
+
+  --field: #eef1f8;
+  --field-glow:
+    radial-gradient(60rem 40rem at 12% -10%, rgba(53, 96, 255, 0.16), transparent 60%),
+    radial-gradient(50rem 35rem at 88% 0%, rgba(143, 77, 255, 0.13), transparent 62%),
+    radial-gradient(45rem 45rem at 50% 110%, rgba(61, 219, 176, 0.10), transparent 60%);
+
+  /* Overlay strata, ascending lift. */
+  --surface-1: rgba(16, 20, 38, 0.035);
+  --surface-2: rgba(16, 20, 38, 0.055);
+  --surface-3: rgba(16, 20, 38, 0.075);
+  --surface-4: rgba(16, 20, 38, 0.105);
+
+  /* Hairlines. */
+  --line-1: rgba(16, 20, 38, 0.08);
+  --line-2: rgba(16, 20, 38, 0.12);
+  --line-3: rgba(16, 20, 38, 0.20);
+
+  /* Ink. ink-strong is the heading rung: full-strength, no alpha, the one
+     step above body copy. */
+  --ink-strong: rgba(13, 17, 32, 0.97);
+  --ink-1: rgba(13, 17, 32, 0.92);
+  --ink-2: rgba(13, 17, 32, 0.72);
+  --ink-3: rgba(13, 17, 32, 0.60);
+  --ink-4: rgba(13, 17, 32, 0.34);
+
+  /* Markers -- dots, switch tracks, timeline nodes. These are shapes to
+     be seen, not tints, so they stay well clear of the surface scale. */
+  --marker-1: rgba(13, 17, 32, 0.30);
+  --marker-2: rgba(13, 17, 32, 0.42);
+
+  /* A switch track is a shape whose off-state must read against BOTH the
+     card behind it and the white thumb on top, so it sits off the surface
+     scale entirely. */
+  --track: rgba(13, 17, 32, 0.26);
+  --scrim: rgba(16, 20, 38, 0.42);
+
+  /* Solid panels: dropdown menus and dialog scrims, which cannot be
+     translucent without the text behind them showing through. */
+  --void-950: #ffffff;
+  --void-900: #f5f7fc;
+  --void-800: #e9edf6;
+  --void-700: #dde3f0;
+
+  /* Hues re-derived for a pale field. aurora-400/500/600 and plasma-500
+     are unchanged: they are only ever solid accent fills carrying white
+     text, which works on either ground. */
+  --aurora-200: #1b3199;
+  --aurora-300: #2545c2;
+  --aurora-400: #5985ff;
+  --aurora-500: #3560ff;
+  --aurora-600: #1f3ef5;
+  --plasma-400: #6a35b8;
+  --plasma-500: #8f4dff;
+  --mint-400: #085c45;
+  --amber-400: #744b0c;
+  --rose-400: #9d2542;
+
+  /* Glass body. */
+  --glass-fill: linear-gradient(145deg, rgba(255,255,255,.78) 0%, rgba(255,255,255,.58) 45%, rgba(255,255,255,.46) 100%);
+  --glass-fill-strong: linear-gradient(145deg, rgba(255,255,255,.90) 0%, rgba(255,255,255,.70) 55%, rgba(255,255,255,.58) 100%);
+  --glass-inset-fill: rgba(255, 255, 255, 0.55);
+  --glass-top: rgba(255, 255, 255, 0.85);
+  --inset-shadow: rgba(16, 20, 38, 0.06);
+  --shadow-glass-t: 0 8px 28px rgba(16, 20, 38, 0.09);
+  --shadow-lift-t: 0 18px 48px rgba(16, 20, 38, 0.13);
+  --grain-dot: rgba(16, 20, 38, 0.30);
+  --grain-blend: multiply;
+  --grain-opacity: 0.10;
+  --shimmer-lo: rgba(16, 20, 38, 0.02);
+  --shimmer-hi: rgba(16, 20, 38, 0.09);
+  --scroll-thumb: rgba(16, 20, 38, 0.20);
+  --scroll-thumb-hover: rgba(16, 20, 38, 0.32);
+
+  /* Accent and semantics, darkened for contrast on a light field.
+     #3ddbb0 reads about 1.9:1 on white -- fine as a glow, unreadable as
+     text -- so all four are re-derived. Values are the measured ones: each
+     clears 4.5:1 both on the glass and on its own 15% badge tint, which is
+     the tighter of the two cases. */
+  --accent: #2b4fd8;
+  --accent-ink: #1b3199;
+  --tone-ok: #085c45;
+  --tone-warn: #744b0c;
+  --tone-bad: #9d2542;
+  --selection: rgba(43, 79, 216, 0.22);
+}
+
+/* Dark, when the OS says so and no explicit light choice overrides it. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --field: #05060f;
+    --field-glow:
+      radial-gradient(60rem 40rem at 12% -10%, rgba(53, 96, 255, 0.28), transparent 60%),
+      radial-gradient(50rem 35rem at 88% 0%, rgba(143, 77, 255, 0.22), transparent 62%),
+      radial-gradient(45rem 45rem at 50% 110%, rgba(61, 219, 176, 0.14), transparent 60%);
+
+    --surface-1: rgba(255, 255, 255, 0.03);
+    --surface-2: rgba(255, 255, 255, 0.055);
+    --surface-3: rgba(255, 255, 255, 0.08);
+    --surface-4: rgba(255, 255, 255, 0.12);
+
+    --line-1: rgba(255, 255, 255, 0.06);
+    --line-2: rgba(255, 255, 255, 0.10);
+    --line-3: rgba(255, 255, 255, 0.20);
+
+    --ink-strong: #ffffff;
+
+    --ink-1: rgba(233, 237, 250, 0.90);
+    --ink-2: rgba(233, 237, 250, 0.70);
+    --ink-3: rgba(233, 237, 250, 0.45);
+    --ink-4: rgba(233, 237, 250, 0.28);
+
+    --marker-1: rgba(255, 255, 255, 0.30);
+    --marker-2: rgba(255, 255, 255, 0.40);
+
+    --track: rgba(255, 255, 255, 0.12);
+
+    --scrim: rgba(3, 4, 12, 0.75);
+
+    --void-950: #05060f;
+    --void-900: #0a0d1c;
+    --void-800: #111528;
+    --void-700: #1a2038;
+
+    --aurora-200: #b8ceff;
+    --aurora-300: #8eb0ff;
+    --aurora-400: #5985ff;
+    --aurora-500: #3560ff;
+    --aurora-600: #1f3ef5;
+    --plasma-400: #b07bff;
+    --plasma-500: #8f4dff;
+    --mint-400: #3ddbb0;
+    --amber-400: #ffb547;
+    --rose-400: #ff6b8a;
+
+    --glass-fill: linear-gradient(145deg, rgba(255,255,255,.09) 0%, rgba(255,255,255,.04) 45%, rgba(255,255,255,.02) 100%);
+    --glass-fill-strong: linear-gradient(145deg, rgba(255,255,255,.14) 0%, rgba(255,255,255,.06) 55%, rgba(255,255,255,.03) 100%);
+    --glass-inset-fill: rgba(5, 6, 15, 0.42);
+    --glass-top: rgba(255, 255, 255, 0.14);
+    --inset-shadow: rgba(0, 0, 0, 0.4);
+    --shadow-glass-t: 0 10px 40px rgba(3, 6, 20, 0.55);
+    --shadow-lift-t: 0 20px 60px rgba(3, 6, 20, 0.65);
+    --grain-dot: rgba(255, 255, 255, 0.35);
+    --grain-blend: overlay;
+    --grain-opacity: 0.18;
+    --shimmer-lo: rgba(255, 255, 255, 0.02);
+    --shimmer-hi: rgba(255, 255, 255, 0.12);
+    --scroll-thumb: rgba(255, 255, 255, 0.14);
+    --scroll-thumb-hover: rgba(255, 255, 255, 0.24);
+
+    --accent: #3560ff;
+    --accent-ink: #ffffff;
+    --tone-ok: #3ddbb0;
+    --tone-warn: #ffb547;
+    --tone-bad: #ff6b8a;
+    --selection: rgba(89, 133, 255, 0.35);
+  }
+}
+
+/* Dark, chosen explicitly. Same values; this block is what lets the
+   toggle win over a light OS. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --field: #05060f;
+  --field-glow:
+    radial-gradient(60rem 40rem at 12% -10%, rgba(53, 96, 255, 0.28), transparent 60%),
+    radial-gradient(50rem 35rem at 88% 0%, rgba(143, 77, 255, 0.22), transparent 62%),
+    radial-gradient(45rem 45rem at 50% 110%, rgba(61, 219, 176, 0.14), transparent 60%);
+
+  --surface-1: rgba(255, 255, 255, 0.03);
+  --surface-2: rgba(255, 255, 255, 0.055);
+  --surface-3: rgba(255, 255, 255, 0.08);
+  --surface-4: rgba(255, 255, 255, 0.12);
+
+  --line-1: rgba(255, 255, 255, 0.06);
+  --line-2: rgba(255, 255, 255, 0.10);
+  --line-3: rgba(255, 255, 255, 0.20);
+
+  --ink-strong: #ffffff;
+
+  --ink-1: rgba(233, 237, 250, 0.90);
+  --ink-2: rgba(233, 237, 250, 0.70);
+  --ink-3: rgba(233, 237, 250, 0.45);
+  --ink-4: rgba(233, 237, 250, 0.28);
+
+  --marker-1: rgba(255, 255, 255, 0.30);
+  --marker-2: rgba(255, 255, 255, 0.40);
+
+  --track: rgba(255, 255, 255, 0.12);
+
+  --scrim: rgba(3, 4, 12, 0.75);
+
+  --void-950: #05060f;
+  --void-900: #0a0d1c;
+  --void-800: #111528;
+  --void-700: #1a2038;
+
+  --aurora-200: #b8ceff;
+  --aurora-300: #8eb0ff;
+  --aurora-400: #5985ff;
+  --aurora-500: #3560ff;
+  --aurora-600: #1f3ef5;
+  --plasma-400: #b07bff;
+  --plasma-500: #8f4dff;
+  --mint-400: #3ddbb0;
+  --amber-400: #ffb547;
+  --rose-400: #ff6b8a;
+
+  --glass-fill: linear-gradient(145deg, rgba(255,255,255,.09) 0%, rgba(255,255,255,.04) 45%, rgba(255,255,255,.02) 100%);
+  --glass-fill-strong: linear-gradient(145deg, rgba(255,255,255,.14) 0%, rgba(255,255,255,.06) 55%, rgba(255,255,255,.03) 100%);
+  --glass-inset-fill: rgba(5, 6, 15, 0.42);
+  --glass-top: rgba(255, 255, 255, 0.14);
+  --inset-shadow: rgba(0, 0, 0, 0.4);
+  --shadow-glass-t: 0 10px 40px rgba(3, 6, 20, 0.55);
+  --shadow-lift-t: 0 20px 60px rgba(3, 6, 20, 0.65);
+  --grain-dot: rgba(255, 255, 255, 0.35);
+  --grain-blend: overlay;
+  --grain-opacity: 0.18;
+  --shimmer-lo: rgba(255, 255, 255, 0.02);
+  --shimmer-hi: rgba(255, 255, 255, 0.12);
+  --scroll-thumb: rgba(255, 255, 255, 0.14);
+  --scroll-thumb-hover: rgba(255, 255, 255, 0.24);
+
+  --accent: #3560ff;
+  --accent-ink: #ffffff;
+  --tone-ok: #3ddbb0;
+  --tone-warn: #ffb547;
+  --tone-bad: #ff6b8a;
+  --selection: rgba(89, 133, 255, 0.35);
 }
 
 /* ------------------------------------------------------------------ */
@@ -52,19 +328,16 @@
   body {
     margin: 0;
     font-family: var(--font-sans);
-    color: rgb(233 237 250);
-    background-color: var(--color-void-950);
-    background-image:
-      radial-gradient(60rem 40rem at 12% -10%, rgba(53, 96, 255, 0.28), transparent 60%),
-      radial-gradient(50rem 35rem at 88% 0%, rgba(143, 77, 255, 0.22), transparent 62%),
-      radial-gradient(45rem 45rem at 50% 110%, rgba(61, 219, 176, 0.14), transparent 60%);
+    color: var(--ink-1);
+    background-color: var(--field);
+    background-image: var(--field-glow);
     background-attachment: fixed;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
 
   ::selection {
-    background: rgba(89, 133, 255, 0.35);
+    background: var(--selection);
   }
 
   ::-webkit-scrollbar {
@@ -75,18 +348,18 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.14);
+    background: var(--scroll-thumb);
     border-radius: 999px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.24);
+    background: var(--scroll-thumb-hover);
     background-clip: content-box;
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-aurora-400);
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
 }
@@ -96,47 +369,37 @@
 /* ------------------------------------------------------------------ */
 @layer components {
   .glass {
-    background: linear-gradient(
-      145deg,
-      rgba(255, 255, 255, 0.09) 0%,
-      rgba(255, 255, 255, 0.04) 45%,
-      rgba(255, 255, 255, 0.02) 100%
-    );
+    background: var(--glass-fill);
     backdrop-filter: blur(var(--blur-glass)) saturate(160%);
     -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(160%);
-    border: 1px solid var(--color-glass-line);
+    border: 1px solid var(--line-2);
     box-shadow:
-      var(--shadow-glass),
-      inset 0 1px 0 rgba(255, 255, 255, 0.14);
+      var(--shadow-glass-t),
+      inset 0 1px 0 var(--glass-top);
   }
 
   .glass-elevated {
-    background: linear-gradient(
-      145deg,
-      rgba(255, 255, 255, 0.14) 0%,
-      rgba(255, 255, 255, 0.06) 55%,
-      rgba(255, 255, 255, 0.03) 100%
-    );
+    background: var(--glass-fill-strong);
     backdrop-filter: blur(34px) saturate(170%);
     -webkit-backdrop-filter: blur(34px) saturate(170%);
-    border: 1px solid var(--color-glass-line-strong);
+    border: 1px solid var(--line-3);
     box-shadow:
-      var(--shadow-lift),
-      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      var(--shadow-lift-t),
+      inset 0 1px 0 var(--glass-top);
   }
 
   .glass-inset {
-    background: rgba(5, 6, 15, 0.42);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+    background: var(--glass-inset-fill);
+    border: 1px solid var(--line-1);
+    box-shadow: inset 0 1px 2px var(--inset-shadow);
   }
 
   .text-dim {
-    color: rgba(233, 237, 250, 0.62);
+    color: var(--ink-2);
   }
 
   .text-faint {
-    color: rgba(233, 237, 250, 0.42);
+    color: var(--ink-3);
   }
 
   .hairline {
@@ -154,12 +417,9 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    opacity: 0.18;
-    mix-blend-mode: overlay;
-    background-image: radial-gradient(
-      rgba(255, 255, 255, 0.35) 0.5px,
-      transparent 0.5px
-    );
+    opacity: var(--grain-opacity);
+    mix-blend-mode: var(--grain-blend);
+    background-image: radial-gradient(var(--grain-dot) 0.5px, transparent 0.5px);
     background-size: 3px 3px;
   }
 }
@@ -168,9 +428,9 @@
   .animate-shimmer {
     background: linear-gradient(
       100deg,
-      rgba(255, 255, 255, 0.02) 20%,
-      rgba(255, 255, 255, 0.12) 45%,
-      rgba(255, 255, 255, 0.02) 70%
+      var(--shimmer-lo) 20%,
+      var(--shimmer-hi) 45%,
+      var(--shimmer-lo) 70%
     );
     background-size: 220% 100%;
     animation: shimmer 2.2s linear infinite;

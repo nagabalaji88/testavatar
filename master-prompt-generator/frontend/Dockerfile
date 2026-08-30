@@ -3,8 +3,14 @@ FROM node:22-alpine AS build
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install
+# The lockfile has to come with package.json: every dependency here is on a
+# caret range, so `npm install` from package.json alone re-resolves all 32 to
+# whatever is newest at build time. That makes an image built today different
+# from one built last week, and turns any upstream minor release into a build
+# that breaks on a machine where nothing changed. `npm ci` installs the
+# locked tree exactly, and fails loudly if the two files disagree.
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY tsconfig.json tsconfig.app.json tsconfig.node.json Vite.config.ts tailwind.config.js index.html ./
 COPY src ./src

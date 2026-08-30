@@ -1,0 +1,83 @@
+{
+  "version": "1.0",
+  "providers": [
+    {
+      "id": "ollama-qwen25",
+      "name": "Qwen2.5 7B Instruct",
+      "provider": "Ollama",
+      "model_key": "ollama_chat/qwen2.5:7b-instruct",
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": true,
+      "temperature": 0.4,
+      "supports_json_mode": true,
+      "weight": 1.0
+    },
+    {
+      "id": "ollama-llama31",
+      "name": "Llama 3.1 8B Instruct",
+      "provider": "Ollama",
+      "model_key": "ollama_chat/llama3.1:8b-instruct-q4_K_M",
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": true,
+      "temperature": 0.4,
+      "supports_json_mode": true,
+      "weight": 1.0
+    },
+    {
+      "id": "ollama-mistral",
+      "name": "Mistral 7B Instruct",
+      "provider": "Ollama",
+      "model_key": "ollama_chat/mistral:7b-instruct",
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": true,
+      "temperature": 0.4,
+      "supports_json_mode": true,
+      "weight": 1.0
+    },
+    {
+      "id": "ollama-gemma2",
+      "name": "Gemma 2 9B Instruct",
+      "provider": "Ollama",
+      "model_key": "ollama_chat/gemma2:9b-instruct-q4_K_M",
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": false,
+      "temperature": 0.4,
+      "supports_json_mode": true,
+      "weight": 1.0
+    },
+    {
+      "id": "ollama-deepseek-r1",
+      "name": "DeepSeek-R1 8B (distill)",
+      "provider": "Ollama",
+      "model_key": "ollama_chat/deepseek-r1:8b",
+      "max_tokens": 8192,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": false,
+      "temperature": 0.4,
+      "supports_json_mode": false,
+      "weight": 1.0
+    },
+    {
+      "id": "groq-llama33-70b",
+      "name": "Llama 3.3 70B (Groq)",
+      "provider": "Groq",
+      "model_key": "groq/llama-3.3-70b-versatile",
+      "max_tokens": 8192,
+      "cost_per_1k_input": 0.0,
+      "cost_per_1k_output": 0.0,
+      "enabled": false,
+      "temperature": 0.4,
+      "supports_json_mode": true,
+      "weight": 1.0
+    }
+  ]
+}

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from enum import StrEnum
-from typing import Any, Literal
+from enum import Enum
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 # ---------------------------------------------------------------------------
 
 
-class MetricCategory(StrEnum):
+class MetricCategory(str, Enum):
     CLARITY_STRUCTURE = "clarity_structure"
     COGNITIVE_QUALITY = "cognitive_quality"
     PRODUCTION_READINESS = "production_readiness"
@@ -142,7 +142,7 @@ METRIC_WEIGHTS: dict[str, float] = {m.key: m.weight for m in METRIC_DEFINITIONS}
 METRIC_BY_KEY: dict[str, MetricDefinition] = {m.key: m for m in METRIC_DEFINITIONS}
 
 
-class RiskLevel(StrEnum):
+class RiskLevel(str, Enum):
     NONE = "None"
     LOW = "Low"
     MEDIUM = "Medium"
@@ -167,7 +167,7 @@ class JudgeVerdict(BaseModel):
     weaknesses: list[str] = Field(default_factory=list)
     missing_elements: list[str] = Field(default_factory=list)
     security_assessment: SecurityAssessment = Field(default_factory=SecurityAssessment)
-    rationale: str | None = None
+    rationale: Optional[str] = None
 
     @field_validator("metrics")
     @classmethod
@@ -204,8 +204,35 @@ class ProviderConfig(BaseModel):
     enabled: bool = True
     temperature: float = Field(default=0.4, ge=0, le=2)
     supports_json_mode: bool = True
-    api_base: str | None = None
+    api_base: Optional[str] = None
+    # Names the environment variable holding this model's credential, e.g.
+    # "OLLAMA_CLOUD_API_KEY". This is the supported way to give one specific
+    # registry entry its own key: models.json is tracked in git, .env is not,
+    # so the secret never lands in a commit.
+    api_key_env: Optional[str] = None
+    # Literal inline credential. Only safe when models.json is mounted from
+    # outside the repository (a Compose volume, a secrets mount); anything
+    # written here in the checked-in file will be committed. api_key_env wins
+    # when both are set.
+    api_key: Optional[str] = None
     weight: float = Field(default=1.0, gt=0)
+
+    @field_validator("api_base")
+    @classmethod
+    def _safe_api_base(cls, value: Optional[str]) -> Optional[str]:
+        """Reject endpoints that would turn the registry into an SSRF tool."""
+        if not value:
+            return value
+        from app.core.net import UnsafeEndpointError, validate_api_base
+
+        try:
+            # resolve=False: a field validator runs on the event loop, and
+            # getaddrinfo blocks it. The admin write path awaits the resolving
+            # form, so a value arriving from a request still gets the full
+            # check -- just not from here.
+            return validate_api_base(value, resolve=False)
+        except UnsafeEndpointError as exc:
+            raise ValueError(str(exc)) from exc
 
     def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
         return round(
@@ -213,6 +240,60 @@ class ProviderConfig(BaseModel):
             + (output_tokens / 1000) * self.cost_per_1k_output,
             6,
         )
+
+
+class StreamTicket(BaseModel):
+    """Single-use credential for one run's websocket stream."""
+
+    ticket: str
+    expires_in: int
+
+
+class ProviderPublic(BaseModel):
+    """A registry entry as the API is allowed to return it.
+
+    ProviderConfig carries the inline api_key, and GET /models is readable by
+    any authenticated principal -- with open registration on, that is anyone
+    who can reach the service. Serialising the model directly hands the
+    credential to every caller, so responses are narrowed to this shape.
+
+    api_key_env survives: the *name* of a variable is not a secret, and an
+    operator debugging a misconfigured entry needs to see which one it reads.
+    """
+
+    id: str
+    name: str
+    provider: str
+    model_key: str
+    max_tokens: int
+    cost_per_1k_input: float
+    cost_per_1k_output: float
+    enabled: bool
+    temperature: float
+    supports_json_mode: bool
+    api_base: Optional[str] = None
+    api_key_env: Optional[str] = None
+    weight: float
+
+    # --- credential state -------------------------------------------------
+    # Whether this entry can actually be called right now. "Enabled" only says
+    # an operator wants it; without a key it is dispatched, fails its whole
+    # retry ladder and is dropped, which from the UI looks like a model that
+    # silently did nothing.
+    credential_available: bool = True
+    # The variable the credential is read from -- the name, never the value --
+    # so the UI can say which one to set instead of only that one is missing.
+    credential_env_var: Optional[str] = None
+    # Served from your own hardware, so no credential applies at all. This is
+    # not the same as "credential missing" and should not read as a problem.
+    is_local_runtime: bool = False
+    # Which credential family would fix this entry, so the UI can link a
+    # keyless model straight to the field that supplies it.
+    credential_family: Optional[str] = None
+    # Which source answered: entry_env | entry_inline | database | environment.
+    # "The key is set" stops being actionable once there are two places it can
+    # come from -- an operator editing the wrong one sees no effect.
+    credential_source: Optional[str] = None
 
 
 class ProviderRegistryConfig(BaseModel):
@@ -235,15 +316,159 @@ class ProviderToggle(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Provider credentials
+# ---------------------------------------------------------------------------
+
+
+class CredentialStatus(BaseModel):
+    """What is known about one family's key, minus the key.
+
+    Deliberately has no field that could carry the value. `last4` is the whole
+    of what is disclosed, and it exists because "configured: true" does not
+    answer the question an operator actually has -- whether the key in place is
+    the one they think it is.
+    """
+
+    family: str
+    label: str
+    env_var: str
+    console_url: Optional[str] = None
+    configured: bool = False
+    last4: Optional[str] = None
+    # database | environment -- which source is currently winning. The database
+    # takes precedence, so an operator who sets a key here can see that it is
+    # now the effective one even though the old variable is still exported.
+    source: Optional[str] = None
+    # True when a stored row exists but the encryption key can no longer read
+    # it, which needs a re-entry rather than looking like an absent key.
+    needs_reentry: bool = False
+    updated_at: Optional[datetime] = None
+    # False for a variable a registry entry names through api_key_env. Those
+    # are addressed by variable name rather than by family, so there is no
+    # family row to store a key against -- the environment is the only place
+    # they can be set. Listed all the same, because an operator who exports one
+    # needs to see it here rather than infer it from the Models page.
+    editable: bool = True
+    # How many enabled registry entries this key unblocks, so the UI can say
+    # what setting it would actually achieve.
+    model_count: int = 0
+
+
+class CredentialWrite(BaseModel):
+    api_key: str = Field(min_length=8, max_length=512)
+
+    @field_validator("api_key")
+    @classmethod
+    def _trimmed_and_present(cls, value: str) -> str:
+        # Copy-paste from a provider console routinely brings whitespace or a
+        # newline along; sent verbatim these produce a malformed auth header
+        # and a 401 that reads as a wrong key.
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("api_key must not be blank")
+        return trimmed
+
+
+class CredentialTestResult(BaseModel):
+    """Outcome of proving a key against the provider before relying on it."""
+
+    family: str
+    ok: bool
+    detail: str
+    model_count: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Live model discovery
+# ---------------------------------------------------------------------------
+
+
+class DiscoveredModelPublic(BaseModel):
+    family: str
+    provider_label: str
+    model_key: str
+    remote_id: str
+    display_name: str
+    cost_per_1k_input: Optional[float] = None
+    cost_per_1k_output: Optional[float] = None
+    max_tokens: Optional[int] = None
+    supports_json_mode: bool = True
+    # Set by the API, not the provider: whether this model is already a
+    # registry entry, so the picker can show it as added instead of offering a
+    # duplicate.
+    in_registry: bool = False
+    registry_id: Optional[str] = None
+
+
+class FamilyDiscoveryPublic(BaseModel):
+    family: str
+    label: str
+    configured: bool
+    models: list[DiscoveredModelPublic] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Registry import / export
+# ---------------------------------------------------------------------------
+
+
+class RegistryImportRequest(BaseModel):
+    """A supplied model list, replacing or merging into the registry.
+
+    Accepts either a full registry document or a bare provider array; the
+    endpoint normalises both, because a file exported from this app and a list
+    someone hand-wrote are both things an operator will reasonably upload.
+    """
+
+    providers: list[ProviderConfig] = Field(min_length=1)
+    version: str = "1.0"
+    # Merge by default: replace silently discards working models that the
+    # uploaded file happens not to mention, which is a destructive default for
+    # a file picker.
+    mode: Literal["merge", "replace"] = "merge"
+
+    @field_validator("providers")
+    @classmethod
+    def _unique_ids(cls, value: list[ProviderConfig]) -> list[ProviderConfig]:
+        seen: set[str] = set()
+        for provider in value:
+            if provider.id in seen:
+                raise ValueError(f"Duplicate provider id in upload: {provider.id}")
+            seen.add(provider.id)
+        return value
+
+
+class RegistryImportResult(BaseModel):
+    mode: str
+    added: list[str] = Field(default_factory=list)
+    updated: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    total: int = 0
+    providers: list["ProviderPublic"] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
 
 
 class UserCreate(BaseModel):
+    """Public registration payload.
+
+    Deliberately has no `role` field: it was previously accepted from the
+    request body on an unauthenticated route, which let anyone create an admin
+    account. Roles are assigned by the server and changed only by an admin
+    through /auth/users/{id}/role.
+    """
+
     email: EmailStr
     password: str = Field(min_length=10, max_length=128)
-    full_name: str | None = None
-    role: Literal["viewer", "engineer", "admin"] = "engineer"
+    full_name: Optional[str] = None
+
+
+class RoleUpdate(BaseModel):
+    role: Literal["viewer", "engineer", "admin"]
 
 
 class UserRead(BaseModel):
@@ -251,7 +476,7 @@ class UserRead(BaseModel):
 
     id: uuid.UUID
     email: str
-    full_name: str | None
+    full_name: Optional[str]
     role: str
     is_active: bool
     created_at: datetime
@@ -279,8 +504,8 @@ class RunCreate(BaseModel):
     target_domain: str = Field(min_length=2, max_length=160)
     constraints: list[str] = Field(default_factory=list, max_length=40)
     requirements: list[str] = Field(default_factory=list, max_length=40)
-    audience: str | None = Field(default=None, max_length=240)
-    output_format: str | None = Field(default=None, max_length=64)
+    audience: Optional[str] = Field(default=None, max_length=240)
+    output_format: Optional[str] = Field(default=None, max_length=64)
     model_ids: list[str] = Field(default_factory=list, max_length=12)
 
 
@@ -298,7 +523,7 @@ class RequirementAnalysis(BaseModel):
     required_sections: list[str] = Field(default_factory=list)
     recommended_output_format: str = "markdown"
     tone: str = "precise, professional"
-    notes: str | None = None
+    notes: Optional[str] = None
 
 
 class CandidateRead(BaseModel):
@@ -309,15 +534,15 @@ class CandidateRead(BaseModel):
     model_name: str
     provider: str
     status: str
-    content: str | None
-    error: str | None
+    content: Optional[str]
+    error: Optional[str]
     input_tokens: int
     output_tokens: int
     cost_usd: float
     latency_ms: int
-    overall_score: float | None
-    metrics: dict[str, float] | None
-    evaluation: dict[str, Any] | None
+    overall_score: Optional[float]
+    metrics: Optional[dict[str, float]]
+    evaluation: Optional[dict[str, Any]]
 
 
 class SectionProvenance(BaseModel):
@@ -326,7 +551,20 @@ class SectionProvenance(BaseModel):
     source_model_name: str
     score: float
     merged_from: list[str] = Field(default_factory=list)
-    strategy: Literal["adopted", "merged", "synthesized", "deduplicated"] = "adopted"
+    strategy: Literal[
+        "adopted", "merged", "synthesized", "deduplicated", "unanimous", "reinforced"
+    ] = "adopted"
+    directive_count: int = 0
+    unanimous_count: int = 0
+
+
+class ReinforcementRecord(BaseModel):
+    """A directive the engine added because no candidate supplied it."""
+
+    id: str
+    section: str
+    directive: str
+    rationale: str
 
 
 class ConflictRecord(BaseModel):
@@ -335,7 +573,7 @@ class ConflictRecord(BaseModel):
     description: str
     competing_models: list[str]
     resolution: str
-    winner_model_id: str | None = None
+    winner_model_id: Optional[str] = None
 
 
 class OptimizationReport(BaseModel):
@@ -353,15 +591,16 @@ class ConsensusRead(BaseModel):
 
     id: uuid.UUID
     content: str
-    overall_score: float | None
-    metrics: dict[str, float] | None
-    evaluation: dict[str, Any] | None
+    overall_score: Optional[float]
+    metrics: Optional[dict[str, float]]
+    evaluation: Optional[dict[str, Any]]
     section_provenance: list[dict[str, Any]]
     conflicts: list[dict[str, Any]]
-    optimization_report: dict[str, Any] | None
+    reinforcements: list[dict[str, Any]] = Field(default_factory=list)
+    optimization_report: Optional[dict[str, Any]]
     token_count: int
     tokens_saved: int
-    improvement_over_best: float | None
+    improvement_over_best: Optional[float]
 
 
 class RunSummary(BaseModel):
@@ -372,31 +611,37 @@ class RunSummary(BaseModel):
     target_domain: str
     status: str
     total_cost_usd: float
-    duration_ms: int | None
+    duration_ms: Optional[int]
     created_at: datetime
-    completed_at: datetime | None
+    completed_at: Optional[datetime]
+    # Joined from the run's consensus row. A list of runs whose only outcome
+    # column is cost cannot answer "which of these was any good", which is the
+    # question someone scanning it actually has. None until synthesis lands.
+    consensus_score: Optional[float] = None
+    improvement_over_best: Optional[float] = None
+    model_count: int = 0
 
 
 class RunDetail(RunSummary):
     business_problem: str
     constraints: list[str]
     requirements: list[str]
-    audience: str | None
-    output_format: str | None
+    audience: Optional[str]
+    output_format: Optional[str]
     selected_model_ids: list[str]
-    analysis: dict[str, Any] | None
-    error: str | None
+    analysis: Optional[dict[str, Any]]
+    error: Optional[str]
     total_input_tokens: int
     total_output_tokens: int
-    trace_id: str | None
+    trace_id: Optional[str]
     candidates: list[CandidateRead] = Field(default_factory=list)
-    consensus: ConsensusRead | None = None
+    consensus: Optional[ConsensusRead] = None
 
 
 class RunAccepted(BaseModel):
     run_id: uuid.UUID
     status: str
-    task_id: str | None = None
+    task_id: Optional[str] = None
     websocket_url: str
 
 
@@ -415,7 +660,7 @@ class SemanticSearchHit(BaseModel):
     target_domain: str
 
 
-class ExportFormat(StrEnum):
+class ExportFormat(str, Enum):
     MARKDOWN = "markdown"
     JSON = "json"
     YAML = "yaml"

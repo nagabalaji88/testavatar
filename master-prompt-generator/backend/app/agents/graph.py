@@ -10,19 +10,27 @@ the terminal `fail` node which records the error and closes the run.
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, Optional
+
+# On Python < 3.12 the typing_extensions backport is required: it is the only
+# variant that reports __required_keys__ correctly, which LangGraph and Pydantic
+# both rely on when they resolve a TypedDict state schema.
+from typing_extensions import TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.agents.analyzer import RequirementAnalyzer, requirement_analyzer
 from app.agents.consensus import CandidateInput, ConsensusEngine, consensus_engine
 from app.agents.evaluator import PromptEvaluator, prompt_evaluator
+from app.core.config import settings
 from app.core.events import EventType, event_bus
 from app.core.logging import get_logger, run_id_ctx
+from app.core.redaction import client_safe_error
 from app.core.telemetry import (
     RUNS_COMPLETED,
     RUNS_IN_FLIGHT,
@@ -44,6 +52,7 @@ from app.models.schemas import (
     RequirementAnalysis,
     RunCreate,
 )
+from app.services.credential_store import credential_store
 from app.services.llm_service import LLMFailure, LLMResult, llm_service
 from app.services.model_registry import UnknownProviderError, model_registry
 from app.services.vector_service import vector_service
@@ -76,9 +85,9 @@ class PipelineDependencies:
 
     def __init__(
         self,
-        analyzer: RequirementAnalyzer | None = None,
-        evaluator: PromptEvaluator | None = None,
-        consensus: ConsensusEngine | None = None,
+        analyzer: Optional[RequirementAnalyzer] = None,
+        evaluator: Optional[PromptEvaluator] = None,
+        consensus: Optional[ConsensusEngine] = None,
     ) -> None:
         self.analyzer = analyzer or requirement_analyzer
         self.evaluator = evaluator or prompt_evaluator
@@ -104,9 +113,9 @@ async def _log_execution(
     stage: str,
     status: str,
     *,
-    model_id: str | None = None,
-    result: LLMResult | None = None,
-    detail: dict[str, Any] | None = None,
+    model_id: Optional[str] = None,
+    result: Optional[LLMResult] = None,
+    detail: Optional[dict[str, Any]] = None,
     latency_ms: int = 0,
 ) -> None:
     async with session_scope() as session:
@@ -126,17 +135,27 @@ async def _log_execution(
         )
 
 
-async def _accumulate_usage(run_id: str, result: LLMResult | None) -> None:
+async def _accumulate_usage(run_id: str, result: Optional[LLMResult]) -> None:
+    """Add one call's usage to the run totals atomically.
+
+    Read-modify-write in Python loses updates here: generation fans out and
+    evaluation now judges concurrently, so several callers hold the same row
+    at once and the last commit wins. Incrementing in SQL makes each addition
+    a single atomic statement, so no usage or cost is silently dropped.
+    """
     if result is None:
         return
     async with session_scope() as session:
-        run = await session.get(PromptRun, uuid.UUID(run_id))
-        if run is None:
-            return
-        run.total_input_tokens += result.input_tokens
-        run.total_output_tokens += result.output_tokens
-        run.total_cost_usd = round(run.total_cost_usd + result.cost_usd, 6)
-        session.add(run)
+        await session.execute(
+            update(PromptRun)
+            .where(PromptRun.id == uuid.UUID(run_id))
+            .values(
+                total_input_tokens=PromptRun.total_input_tokens + result.input_tokens,
+                total_output_tokens=PromptRun.total_output_tokens
+                + result.output_tokens,
+                total_cost_usd=PromptRun.total_cost_usd + result.cost_usd,
+            )
+        )
 
 
 def _resolve_providers(provider_ids: list[str]) -> list[ProviderConfig]:
@@ -360,8 +379,13 @@ def build_nodes(deps: PipelineDependencies):
             await event_bus.emit(run_id, EventType.STAGE_STARTED, stage="evaluation")
             await _set_status(run_id, RunStatus.EVALUATING)
 
-            verdicts: list[dict[str, Any]] = []
-            for candidate in candidates:
+            # Judged concurrently, not in a loop. Each candidate's verdict is
+            # independent of every other, so a serial loop made this stage cost
+            # the sum of N judge calls when it only ever needed the slowest one
+            # -- on a local-model deployment that was the single largest block
+            # of wall-clock in the entire run. llm_service's semaphore still
+            # bounds how many actually reach the provider at once.
+            async def judge(candidate: dict[str, Any]) -> dict[str, Any]:
                 verdict, result = await deps.evaluator.evaluate(
                     prompt_id=candidate["model_id"],
                     content=candidate["content"],
@@ -369,7 +393,6 @@ def build_nodes(deps: PipelineDependencies):
                     analysis=analysis,
                 )
                 payload = verdict.model_dump(mode="json")
-                verdicts.append(payload)
 
                 await _update_candidate(
                     run_id,
@@ -396,6 +419,13 @@ def build_nodes(deps: PipelineDependencies):
                     metrics=verdict.metrics,
                     evaluation=payload,
                 )
+                return payload
+
+            # gather preserves input order, so verdicts stay aligned with
+            # candidates regardless of which judge finishes first.
+            verdicts: list[dict[str, Any]] = list(
+                await asyncio.gather(*(judge(c) for c in candidates))
+            )
 
         elapsed = time.perf_counter() - started
         STAGE_LATENCY.labels("evaluation").observe(elapsed)
@@ -463,12 +493,25 @@ def build_nodes(deps: PipelineDependencies):
                 verdict.overall_score - best_candidate.verdict.overall_score, 2
             )
 
+            # Indexed alongside the vector so semantic search can scope results
+            # to the caller. Read from the run rather than threaded through the
+            # graph state, which does not carry the owner.
+            async with session_scope() as session:
+                owner_id = (
+                    await session.execute(
+                        select(PromptRun.owner_id).where(
+                            PromptRun.id == uuid.UUID(run_id)
+                        )
+                    )
+                ).scalar_one_or_none()
+
             point_id = await vector_service.index_prompt(
                 run_id=run_id,
                 title=request.title,
                 target_domain=request.target_domain,
                 content=result.content,
                 score=verdict.overall_score,
+                owner_id=str(owner_id) if owner_id else None,
             )
 
             async with session_scope() as session:
@@ -491,6 +534,9 @@ def build_nodes(deps: PipelineDependencies):
                 record.conflicts = [
                     item.model_dump(mode="json") for item in result.conflicts
                 ]
+                record.reinforcements = [
+                    item.model_dump(mode="json") for item in result.reinforcements
+                ]
                 record.optimization_report = result.optimization.model_dump(mode="json")
                 record.token_count = result.token_count
                 record.tokens_saved = result.optimization.tokens_saved
@@ -507,6 +553,7 @@ def build_nodes(deps: PipelineDependencies):
                 detail={
                     "conflicts": len(result.conflicts),
                     "sections": len(result.provenance),
+                    "reinforcements": len(result.reinforcements),
                     "improvement_over_best": improvement,
                 },
             )
@@ -520,6 +567,9 @@ def build_nodes(deps: PipelineDependencies):
                     item.model_dump(mode="json") for item in result.provenance
                 ],
                 "conflicts": [item.model_dump(mode="json") for item in result.conflicts],
+                "reinforcements": [
+                    item.model_dump(mode="json") for item in result.reinforcements
+                ],
                 "optimization_report": result.optimization.model_dump(mode="json"),
                 "token_count": result.token_count,
                 "tokens_saved": result.optimization.tokens_saved,
@@ -571,7 +621,7 @@ def build_nodes(deps: PipelineDependencies):
     return analyze_node, generate_node, evaluate_node, consensus_node, finalize_node
 
 
-def build_graph(deps: PipelineDependencies | None = None):
+def build_graph(deps: Optional[PipelineDependencies] = None):
     """Compile the LangGraph state machine."""
     analyze, generate, evaluate, consensus, finalize = build_nodes(
         deps or PipelineDependencies()
@@ -581,14 +631,17 @@ def build_graph(deps: PipelineDependencies | None = None):
     graph.add_node("analyze", analyze)
     graph.add_node("generate", generate)
     graph.add_node("evaluate", evaluate)
-    graph.add_node("consensus", consensus)
+    # Named "synthesize", not "consensus": LangGraph forbids a node name that
+    # collides with a PipelineState key, and "consensus" is already the state
+    # field the node writes into.
+    graph.add_node("synthesize", consensus)
     graph.add_node("finalize", finalize)
 
     graph.add_edge(START, "analyze")
     graph.add_edge("analyze", "generate")
     graph.add_edge("generate", "evaluate")
-    graph.add_edge("evaluate", "consensus")
-    graph.add_edge("consensus", "finalize")
+    graph.add_edge("evaluate", "synthesize")
+    graph.add_edge("synthesize", "finalize")
     graph.add_edge("finalize", END)
 
     return graph.compile()
@@ -625,6 +678,17 @@ async def execute_pipeline(run_id: str, request: RunCreate, provider_ids: list[s
     """Run the full pipeline for a persisted run, recording terminal failures."""
     run_id_ctx.set(run_id)
     RUNS_IN_FLIGHT.inc()
+
+    # This is a Celery worker, a different process from the API that accepted
+    # the run. Its credential snapshot and its registry cache were both built
+    # at worker start, so without this a key or a model added through the UI
+    # would not exist here -- the run would fail on a model the launcher had
+    # just offered as selectable. Once per run is enough: a run's provider set
+    # is fixed at this point.
+    async with session_scope() as session:
+        await credential_store.refresh(session)
+    model_registry.load()
+
     await event_bus.emit(run_id, EventType.RUN_STARTED, title=request.title)
 
     initial: PipelineState = {
@@ -638,8 +702,14 @@ async def execute_pipeline(run_id: str, request: RunCreate, provider_ids: list[s
         with span("pipeline.run", **{"mpg.run_id": run_id}):
             await get_graph().ainvoke(initial)
     except Exception as exc:
-        message = f"{type(exc).__name__}: {exc}"
+        # logger.exception keeps the full text and the real traceback; every
+        # copy below is read back through the API, so each carries the trimmed
+        # version instead.
         logger.exception("run_failed", extra={"run_id": run_id})
+        message = client_safe_error(
+            f"{type(exc).__name__}: {exc}",
+            reveal_internals=settings.environment == "local",
+        )
         completed_at = datetime.now(timezone.utc)
         await _set_status(
             run_id, RunStatus.FAILED, error=message, completed_at=completed_at

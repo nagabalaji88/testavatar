@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated, Any
+from collections.abc import Sequence
+from typing import Annotated, Any, Optional
 
 from fastapi import (
     APIRouter,
@@ -13,6 +16,7 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Request,
     Response,
     WebSocket,
     WebSocketDisconnect,
@@ -26,40 +30,73 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.events import EventType, event_bus
 from app.core.logging import get_logger
+from app.core.net import UnsafeEndpointError, validate_api_base_async
+from app.core.provider_families import FAMILIES_BY_NAME, PROVIDER_FAMILIES
 from app.core.security import (
     Principal,
+    oauth2_scheme,
     Role,
-    authenticate_websocket,
     create_access_token,
     create_refresh_token,
+    create_stream_ticket,
     decode_token,
     get_current_principal,
     hash_password,
+    redeem_stream_ticket,
     require_role,
     verify_password,
 )
+from app.core.ratelimit import client_identity, rate_limiter
+from app.core.revocation import revocation_store
 from app.core.telemetry import RUNS_STARTED
 from app.db.session import get_session
-from app.models.domain import ConsensusPrompt, ExecutionLog, PromptRun, RunStatus, User
+from app.models.domain import (
+    ConsensusPrompt,
+    ExecutionLog,
+    PromptCandidate,
+    PromptRun,
+    ProviderCredential,
+    RunStatus,
+    User,
+)
 from app.models.schemas import (
     METRIC_DEFINITIONS,
     ConsensusRead,
+    CredentialStatus,
+    CredentialTestResult,
+    CredentialWrite,
+    DiscoveredModelPublic,
     ExportRequest,
+    FamilyDiscoveryPublic,
     HealthReport,
     ProviderConfig,
+    ProviderPublic,
     ProviderToggle,
     RefreshRequest,
+    RegistryImportRequest,
+    RegistryImportResult,
+    RoleUpdate,
     RunAccepted,
     RunCreate,
     RunDetail,
     RunSummary,
     SemanticSearchHit,
     SemanticSearchRequest,
+    StreamTicket,
     TokenPair,
     UserCreate,
     UserRead,
 )
+from app.services.credential_store import credential_store
 from app.services.export_service import export_consensus
+from app.services.llm_service import (
+    credential_env_var,
+    credential_family,
+    credential_source,
+    is_local_runtime,
+    requires_credential,
+)
+from app.services.model_discovery import model_discovery
 from app.services.model_registry import UnknownProviderError, model_registry
 from app.services.vector_service import vector_service
 
@@ -84,7 +121,28 @@ AdminUser = Annotated[Principal, Depends(require_role(Role.ADMIN))]
 @auth_router.post(
     "/register", response_model=UserRead, status_code=status.HTTP_201_CREATED
 )
-async def register(payload: UserCreate, session: SessionDep) -> User:
+async def register(
+    payload: UserCreate, request: Request, session: SessionDep
+) -> User:
+    """Create an account.
+
+    The role is assigned by the server, never taken from the request. The first
+    account on a fresh instance becomes the admin so the deployment is usable;
+    everyone after that is an engineer and must be promoted by an admin.
+    """
+    if not settings.allow_open_registration:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Registration is closed. Ask an administrator for an account.",
+        )
+
+    await rate_limiter.check(
+        "register",
+        client_identity(request),
+        settings.rate_limit_register_per_hour,
+        3600,
+    )
+
     existing = (
         await session.execute(select(User).where(User.email == payload.email.lower()))
     ).scalar_one_or_none()
@@ -93,23 +151,44 @@ async def register(payload: UserCreate, session: SessionDep) -> User:
             status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
         )
 
+    user_count = (
+        await session.execute(select(func.count()).select_from(User))
+    ).scalar_one()
+    role = Role.ADMIN if user_count == 0 else Role.ENGINEER
+
     user = User(
         email=payload.email.lower(),
         hashed_password=hash_password(payload.password),
         full_name=payload.full_name,
-        role=payload.role,
+        role=role.value,
     )
     session.add(user)
     await session.flush()
-    logger.info("user_registered", extra={"user_id": str(user.id)})
+    logger.info(
+        "user_registered",
+        extra={"user_id": str(user.id), "role": role.value, "bootstrap": user_count == 0},
+    )
     return user
 
 
 @auth_router.post("/login", response_model=TokenPair)
 async def login(
+    request: Request,
     session: SessionDep,
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> TokenPair:
+    # Throttle by caller and by account, so neither a spray across accounts nor
+    # a focused attack on one account gets unlimited attempts.
+    await rate_limiter.check(
+        "login", client_identity(request), settings.rate_limit_login_per_minute, 60
+    )
+    await rate_limiter.check(
+        "login-account",
+        form.username.strip().lower(),
+        settings.rate_limit_login_per_minute,
+        60,
+    )
+
     user = (
         await session.execute(
             select(User).where(User.email == form.username.strip().lower())
@@ -161,6 +240,76 @@ async def read_me(principal: CurrentUser, session: SessionDep) -> User:
     return user
 
 
+@auth_router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    principal: CurrentUser,
+    token: Annotated[Optional[str], Depends(oauth2_scheme)],
+    payload: Optional[RefreshRequest] = Body(default=None),
+) -> Response:
+    """Revoke the presented tokens.
+
+    A JWT is valid until it expires, so signing out has to be recorded
+    server-side; without this, a leaked token stays usable for its full hour
+    (or fourteen days, for a refresh token).
+    """
+    if token:
+        claims = decode_token(token)
+        await revocation_store.revoke_token(claims.jti, claims.exp)
+    if payload and payload.refresh_token:
+        try:
+            refresh_claims = decode_token(payload.refresh_token, expected_type="refresh")
+            await revocation_store.revoke_token(refresh_claims.jti, refresh_claims.exp)
+        except HTTPException:
+            pass  # already invalid; nothing left to revoke
+
+    logger.info("user_logged_out", extra={"user_id": str(principal.user_id)})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@auth_router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
+async def logout_everywhere(principal: CurrentUser) -> Response:
+    """Invalidate every token already issued to the caller."""
+    await revocation_store.revoke_user(str(principal.user_id))
+    logger.info("user_sessions_revoked", extra={"user_id": str(principal.user_id)})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@auth_router.get("/users", response_model=list[UserRead])
+async def list_users(session: SessionDep, principal: AdminUser) -> list[User]:
+    result = await session.execute(select(User).order_by(User.created_at.asc()))
+    return list(result.scalars().all())
+
+
+@auth_router.patch("/users/{user_id}/role", response_model=UserRead)
+async def set_user_role(
+    user_id: uuid.UUID,
+    payload: RoleUpdate,
+    session: SessionDep,
+    principal: AdminUser,
+) -> User:
+    """Change a user's role. Admin only -- the sole way to grant admin."""
+    user = await session.get(User, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    if user.id == principal.user_id and payload.role != Role.ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Refusing to remove your own admin role; promote another admin first",
+        )
+
+    user.role = payload.role
+    session.add(user)
+    # Tokens carry the role, so existing sessions would keep the old privileges.
+    await revocation_store.revoke_user(str(user.id))
+    logger.info(
+        "user_role_changed",
+        extra={"user_id": str(user.id), "role": payload.role, "by": str(principal.user_id)},
+    )
+    return user
+
+
 # ---------------------------------------------------------------------------
 # Runs
 # ---------------------------------------------------------------------------
@@ -197,6 +346,12 @@ async def create_run(
     payload: RunCreate, session: SessionDep, principal: EngineerUser
 ) -> RunAccepted:
     """Persist a run and dispatch the pipeline to a Celery worker."""
+    # Every run spends real money at a provider, so this is a budget control as
+    # much as an abuse control.
+    await rate_limiter.check(
+        "runs", str(principal.user_id), settings.rate_limit_runs_per_hour, 3600
+    )
+
     try:
         providers = model_registry.resolve(payload.model_ids)
     except UnknownProviderError as exc:
@@ -231,7 +386,7 @@ async def create_run(
         ],
     )
 
-    task_id: str | None = None
+    task_id: Optional[str] = None
     try:
         from app.workers.celery_app import execute_pipeline_task
 
@@ -272,15 +427,53 @@ async def list_runs(
     principal: CurrentUser,
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    run_status: str | None = Query(default=None, alias="status"),
-) -> list[PromptRun]:
-    query = select(PromptRun).order_by(PromptRun.created_at.desc())
+    run_status: Optional[str] = Query(default=None, alias="status"),
+) -> list[RunSummary]:
+    """Runs newest first, each carrying its outcome as well as its cost.
+
+    The score and lift come from an outer join rather than a follow-up query
+    per run: the list is the one place that reads every run at once, so a
+    per-row lookup here is the N+1 that shows up first under real history.
+    Outer, because a queued or failed run has no consensus row and must still
+    appear.
+    """
+    candidate_counts = (
+        select(
+            PromptCandidate.run_id.label("run_id"),
+            func.count(PromptCandidate.id).label("n"),
+        )
+        .group_by(PromptCandidate.run_id)
+        .subquery()
+    )
+
+    query = (
+        select(
+            PromptRun,
+            ConsensusPrompt.overall_score,
+            ConsensusPrompt.improvement_over_best,
+            func.coalesce(candidate_counts.c.n, 0),
+        )
+        .outerjoin(ConsensusPrompt, ConsensusPrompt.run_id == PromptRun.id)
+        .outerjoin(candidate_counts, candidate_counts.c.run_id == PromptRun.id)
+        .order_by(PromptRun.created_at.desc())
+    )
     if not principal.has_at_least(Role.ADMIN):
         query = query.where(PromptRun.owner_id == principal.user_id)
     if run_status:
         query = query.where(PromptRun.status == run_status)
-    result = await session.execute(query.limit(limit).offset(offset))
-    return list(result.scalars().all())
+
+    rows = (await session.execute(query.limit(limit).offset(offset))).all()
+    return [
+        RunSummary(
+            **RunSummary.model_validate(run).model_dump(
+                exclude={"consensus_score", "improvement_over_best", "model_count"}
+            ),
+            consensus_score=score,
+            improvement_over_best=lift,
+            model_count=count,
+        )
+        for run, score, lift, count in rows
+    ]
 
 
 @runs_router.get("/stats", response_model=dict)
@@ -393,7 +586,7 @@ async def export_run(
     run_id: uuid.UUID,
     session: SessionDep,
     principal: CurrentUser,
-    payload: ExportRequest | None = Body(default=None),
+    payload: Optional[ExportRequest] = Body(default=None),
 ) -> Response:
     run = await _load_run(session, run_id)
     _authorize_run(run, principal)
@@ -430,25 +623,72 @@ async def delete_run(
 async def semantic_search(
     payload: SemanticSearchRequest, principal: CurrentUser
 ) -> list[SemanticSearchHit]:
-    return await vector_service.search(payload.query, payload.limit, payload.min_score)
+    # The Qdrant collection spans every tenant, so the search is scoped to the
+    # caller. Admins search all of it, matching how list_runs and run_stats
+    # already widen for the admin role.
+    return await vector_service.search(
+        payload.query,
+        payload.limit,
+        payload.min_score,
+        owner_id=str(principal.user_id),
+        include_all_owners=principal.has_at_least(Role.ADMIN),
+    )
+
+
+@runs_router.post("/{run_id}/stream-ticket", response_model=StreamTicket)
+async def issue_stream_ticket(
+    run_id: uuid.UUID, session: SessionDep, principal: CurrentUser
+) -> StreamTicket:
+    """Exchange a header-authenticated request for a ticket the socket accepts.
+
+    Ownership is checked here, where the Authorization header is available, so
+    the credential that ends up in the URL is already narrowed to one run.
+    """
+    run = await _load_run(session, run_id)
+    _authorize_run(run, principal)
+    return StreamTicket(
+        ticket=create_stream_ticket(str(principal.user_id), principal.role, str(run_id)),
+        expires_in=settings.ws_ticket_ttl_seconds,
+    )
 
 
 @runs_router.websocket("/{run_id}/stream")
-async def stream_run(websocket: WebSocket, run_id: uuid.UUID) -> None:
+async def stream_run(
+    websocket: WebSocket, run_id: uuid.UUID, session: SessionDep
+) -> None:
     """Stream pipeline events for a run.
 
-    The token is supplied as a query parameter because browsers cannot set
-    headers on a websocket handshake.
+    The credential is a query parameter because a browser cannot set headers on
+    a websocket handshake -- and because a URL reaches proxy logs, access logs
+    and browser history, what goes there is a ticket from
+    POST /runs/{id}/stream-ticket: scoped to one run, valid for about a minute,
+    and burned on first use. An access token was accepted here until every
+    client had moved over; it is account-wide and lives an hour, so a copy
+    recovered from a log was worth having.
+
+    Redeeming the ticket establishes who is calling, not whether they may read
+    *this* run. Every REST route pairs authentication with _authorize_run, and
+    the events streamed here carry the same generated content those routes
+    guard, so the pairing holds here too.
     """
-    token = websocket.query_params.get("token")
     try:
-        authenticate_websocket(token)
+        principal = await redeem_stream_ticket(
+            websocket.query_params.get("ticket"), str(run_id)
+        )
+        run = await _load_run(session, run_id)
+        _authorize_run(run, principal)
     except HTTPException:
+        # One close code for "bad token", "no such run" and "not yours": before
+        # the handshake completes there is no channel to carry a reason, and
+        # distinguishing them here would let a caller enumerate run ids.
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     await websocket.accept()
-    logger.info("websocket_connected", extra={"run_id": str(run_id)})
+    logger.info(
+        "websocket_connected",
+        extra={"run_id": str(run_id), "user_id": str(principal.user_id)},
+    )
 
     try:
         async for event in event_bus.subscribe(run_id):
@@ -471,22 +711,56 @@ async def stream_run(websocket: WebSocket, run_id: uuid.UUID) -> None:
 # ---------------------------------------------------------------------------
 
 
-@models_router.get("", response_model=list[ProviderConfig])
-async def list_models(principal: CurrentUser) -> list[ProviderConfig]:
-    return model_registry.all()
+def _to_public(provider: ProviderConfig) -> ProviderPublic:
+    """Registry entry plus whether it can actually be called right now.
+
+    Computed per request rather than stored: a credential arrives from the
+    environment or the credential store, so the same registry file is
+    answerable differently on two deployments, and setting a key has to change
+    the answer without anyone editing models.json.
+    """
+    return ProviderPublic(
+        **provider.model_dump(exclude={"api_key"}),
+        credential_available=not requires_credential(provider),
+        credential_env_var=credential_env_var(provider),
+        is_local_runtime=is_local_runtime(provider),
+        credential_family=credential_family(provider),
+        credential_source=credential_source(provider),
+    )
 
 
-@models_router.post("", response_model=ProviderConfig, status_code=status.HTTP_201_CREATED)
+@models_router.get("", response_model=list[ProviderPublic])
+async def list_models(
+    principal: CurrentUser, session: SessionDep
+) -> list[ProviderPublic]:
+    # The listing is what the UI decides selectability from, so it must not be
+    # answered from a credential snapshot that predates an edit made in another
+    # process. Cheap: one query at most every TTL_SECONDS.
+    await credential_store.refresh_if_stale(session)
+    return [_to_public(provider) for provider in model_registry.all()]
+
+
+@models_router.post("", response_model=ProviderPublic, status_code=status.HTTP_201_CREATED)
 async def upsert_model(payload: ProviderConfig, principal: AdminUser) -> ProviderConfig:
-    return model_registry.upsert(payload)
+    # The schema validator only ran the checks that cost nothing, so the
+    # resolving half happens here, off the event loop. This is the path an
+    # attacker-supplied api_base actually arrives on.
+    if payload.api_base:
+        try:
+            await validate_api_base_async(payload.api_base)
+        except UnsafeEndpointError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
+    return _to_public(model_registry.upsert(payload))
 
 
-@models_router.patch("/{provider_id}", response_model=ProviderConfig)
+@models_router.patch("/{provider_id}", response_model=ProviderPublic)
 async def toggle_model(
     provider_id: str, payload: ProviderToggle, principal: AdminUser
 ) -> ProviderConfig:
     try:
-        return model_registry.set_enabled(provider_id, payload.enabled)
+        return _to_public(model_registry.set_enabled(provider_id, payload.enabled))
     except UnknownProviderError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown provider: {exc}"
@@ -504,9 +778,352 @@ async def delete_model(provider_id: str, principal: AdminUser) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@models_router.post("/reload", response_model=list[ProviderConfig])
-async def reload_models(principal: AdminUser) -> list[ProviderConfig]:
-    return model_registry.reload().providers
+@models_router.post("/reload", response_model=list[ProviderPublic])
+async def reload_models(principal: AdminUser) -> list[ProviderPublic]:
+    return [_to_public(p) for p in model_registry.reload().providers]
+
+
+# --- live provider catalogue ------------------------------------------------
+
+
+@models_router.get("/catalog", response_model=list[FamilyDiscoveryPublic])
+async def model_catalog(
+    principal: AdminUser,
+    session: SessionDep,
+    refresh: bool = Query(default=False),
+) -> list[FamilyDiscoveryPublic]:
+    """Ask every configured provider which models its key can reach.
+
+    Admin-only because it spends the stored credentials to make outbound calls
+    on the caller's behalf, and because the answer names every model the
+    account has access to.
+
+    A family with no key is returned as `configured: false` with an empty list
+    rather than omitted -- the UI shows it as a provider awaiting a key, which
+    is the state an operator most needs to see.
+    """
+    await credential_store.refresh_if_stale(session)
+
+    # Matched on model_key, not id: the same model added under a hand-picked id
+    # is still the same model, and offering it again would create a duplicate
+    # registry entry that fans out to one provider twice.
+    existing = {p.model_key: p.id for p in model_registry.all()}
+
+    discoveries = await model_discovery.discover_all(refresh=refresh)
+    return [
+        FamilyDiscoveryPublic(
+            family=discovery.family,
+            label=discovery.label,
+            configured=discovery.configured,
+            error=discovery.error,
+            models=[
+                DiscoveredModelPublic(
+                    **{
+                        field: getattr(model, field)
+                        for field in (
+                            "family",
+                            "provider_label",
+                            "model_key",
+                            "remote_id",
+                            "display_name",
+                            "cost_per_1k_input",
+                            "cost_per_1k_output",
+                            "max_tokens",
+                            "supports_json_mode",
+                        )
+                    },
+                    in_registry=model.model_key in existing,
+                    registry_id=existing.get(model.model_key),
+                )
+                for model in discovery.models
+            ],
+        )
+        for discovery in discoveries
+    ]
+
+
+# --- bulk import / export --------------------------------------------------
+
+
+@models_router.get("/export")
+async def export_registry(principal: AdminUser) -> Response:
+    """Download the registry as the JSON document that /import accepts.
+
+    Round-trips deliberately: the export is the template for an edit-and-
+    re-upload, so it has to be a valid import payload rather than a report.
+
+    api_key is excluded. An inline credential is the one field that must not
+    leave the server, and an export is the easiest possible way for one to end
+    up in a chat message or a ticket.
+    """
+    registry = model_registry.load()
+    document = {
+        "version": registry.version,
+        "providers": [
+            provider.model_dump(mode="json", exclude={"api_key"})
+            for provider in registry.providers
+        ],
+    }
+    return Response(
+        content=json.dumps(document, indent=2) + "\n",
+        media_type="application/json",
+        headers={
+            "Content-Disposition": 'attachment; filename="models.json"'
+        },
+    )
+
+
+@models_router.post("/import", response_model=RegistryImportResult)
+async def import_registry(
+    payload: RegistryImportRequest, principal: AdminUser
+) -> RegistryImportResult:
+    """Apply a supplied model list to the registry.
+
+    Every api_base in the batch is resolved and checked before anything is
+    written. Doing it up front is what makes a rejected upload a no-op: a
+    single unsafe endpoint in a fifty-model file must not leave the first
+    forty-nine applied.
+    """
+    for provider in payload.providers:
+        if not provider.api_base:
+            continue
+        try:
+            await validate_api_base_async(provider.api_base)
+        except UnsafeEndpointError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{provider.id}: {exc}",
+            ) from exc
+
+    before = {p.id for p in model_registry.all()}
+    added, updated = model_registry.import_providers(
+        payload.providers, replace=payload.mode == "replace"
+    )
+    after = model_registry.all()
+
+    return RegistryImportResult(
+        mode=payload.mode,
+        added=added,
+        updated=updated,
+        removed=sorted(before - {p.id for p in after}),
+        total=len(after),
+        providers=[_to_public(p) for p in after],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Provider credentials
+# ---------------------------------------------------------------------------
+
+
+def _credential_statuses(
+    rows: dict[str, ProviderCredential],
+) -> list[CredentialStatus]:
+    """Per-family credential state, with the value withheld.
+
+    model_count is included because "configured" on its own does not tell an
+    operator whether setting this key would achieve anything -- a key for a
+    family with no registry entries changes nothing they can see.
+    """
+    providers = model_registry.all()
+    undecryptable = credential_store.undecryptable_families()
+
+    statuses: list[CredentialStatus] = []
+    for family in PROVIDER_FAMILIES:
+        row = rows.get(family.name)
+        from_db = credential_store.get(family.name) is not None
+        from_env = bool(
+            (getattr(settings, family.settings_attr, None) or "").strip()
+        )
+        statuses.append(
+            CredentialStatus(
+                family=family.name,
+                label=family.label,
+                env_var=family.env_var,
+                console_url=family.console_url,
+                configured=from_db or from_env,
+                # From the stored row, so it describes the key on record even
+                # when the effective one comes from the environment.
+                last4=row.last4 if row else None,
+                source="database" if from_db else ("environment" if from_env else None),
+                needs_reentry=family.name in undecryptable,
+                updated_at=row.updated_at if row else None,
+                model_count=sum(
+                    1
+                    for p in providers
+                    if p.enabled
+                    and not p.api_key_env
+                    and not p.api_key
+                    and family.matches(p.provider)
+                ),
+            )
+        )
+
+    statuses.extend(_entry_credential_statuses(providers))
+    return statuses
+
+
+def _entry_credential_statuses(
+    providers: Sequence[ProviderConfig],
+) -> list[CredentialStatus]:
+    """Rows for variables named by a registry entry's api_key_env.
+
+    A hosted deployment of an open-weight model belongs to no family -- its
+    `provider` still reads "Ollama" -- so it names its own variable instead.
+    Nothing above describes those, which left an operator exporting
+    OLLAMA_CLOUD_API_KEY seeing no mention of it on this page while the Models
+    page showed the key as present: two screens disagreeing about one
+    credential, with the one they went to for keys being the wrong one.
+
+    Read-only by construction. There is no family to store a value against, so
+    the environment is the only place these can be set.
+    """
+    covered = {family.env_var for family in PROVIDER_FAMILIES}
+
+    grouped: dict[str, list[ProviderConfig]] = {}
+    for provider in providers:
+        variable = (provider.api_key_env or "").strip()
+        if variable and variable not in covered:
+            grouped.setdefault(variable, []).append(provider)
+
+    statuses: list[CredentialStatus] = []
+    for variable, entries in sorted(grouped.items()):
+        present = bool(os.environ.get(variable, "").strip())
+        # Name it after the provider when the entries agree, since that is what
+        # the operator recognises; the variable is shown beside it either way.
+        names = sorted({e.provider.strip() for e in entries if e.provider.strip()})
+        statuses.append(
+            CredentialStatus(
+                family=f"env:{variable}",
+                label=names[0] if len(names) == 1 else variable,
+                env_var=variable,
+                configured=present,
+                source="environment" if present else None,
+                editable=False,
+                model_count=sum(1 for e in entries if e.enabled),
+            )
+        )
+    return statuses
+
+
+async def _credential_rows(session: AsyncSession) -> dict[str, ProviderCredential]:
+    rows = (await session.execute(select(ProviderCredential))).scalars().all()
+    return {row.family: row for row in rows}
+
+
+@models_router.get("/credentials", response_model=list[CredentialStatus])
+async def list_credentials(
+    principal: AdminUser, session: SessionDep
+) -> list[CredentialStatus]:
+    await credential_store.refresh(session)
+    return _credential_statuses(await _credential_rows(session))
+
+
+@models_router.put("/credentials/{family}", response_model=CredentialStatus)
+async def set_credential(
+    family: str,
+    payload: CredentialWrite,
+    principal: AdminUser,
+    session: SessionDep,
+) -> CredentialStatus:
+    """Store a provider key. Admin only; the value is never readable again."""
+    if family not in FAMILIES_BY_NAME:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown provider family: {family}",
+        )
+
+    try:
+        await credential_store.set(
+            session, family, payload.api_key, updated_by=principal.user_id
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    # The cached listing was produced with the old key -- or with none -- so it
+    # would answer the next catalogue request with a stale "not configured".
+    model_discovery.invalidate(family)
+
+    logger.info(
+        "provider_credential_set",
+        extra={"family": family, "by": str(principal.user_id)},
+    )
+    await session.flush()
+    return next(
+        s
+        for s in _credential_statuses(await _credential_rows(session))
+        if s.family == family
+    )
+
+
+@models_router.delete(
+    "/credentials/{family}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def clear_credential(
+    family: str, principal: AdminUser, session: SessionDep
+) -> Response:
+    if family not in FAMILIES_BY_NAME:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown provider family: {family}",
+        )
+    await credential_store.clear(session, family)
+    model_discovery.invalidate(family)
+    logger.info(
+        "provider_credential_deleted",
+        extra={"family": family, "by": str(principal.user_id)},
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@models_router.post(
+    "/credentials/{family}/test", response_model=CredentialTestResult
+)
+async def test_credential(
+    family: str, principal: AdminUser, session: SessionDep
+) -> CredentialTestResult:
+    """Prove a key against the provider instead of assuming it is present.
+
+    The check calls the provider's *listing* endpoint, so it settles whether
+    the key is accepted and what it can reach, and the provider's own wording
+    comes back on failure -- "rejected" and "out of quota" need opposite fixes
+    and must not collapse into one message.
+
+    Listing does not consume completion quota, so a pass does not promise the
+    account can afford a run; the success message says so rather than implying
+    a guarantee it cannot make. Spending a real completion to find out would
+    charge the operator for a diagnostic.
+    """
+    if family not in FAMILIES_BY_NAME:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown provider family: {family}",
+        )
+
+    await credential_store.refresh(session)
+    discovery = next(
+        d
+        for d in await model_discovery.discover_all(refresh=True)
+        if d.family == family
+    )
+
+    if not discovery.configured:
+        return CredentialTestResult(
+            family=family, ok=False, detail="no key is configured"
+        )
+    if discovery.error:
+        return CredentialTestResult(family=family, ok=False, detail=discovery.error)
+    return CredentialTestResult(
+        family=family,
+        ok=True,
+        detail=(
+            f"key is valid — {len(discovery.models)} chat models reachable "
+            "(does not check remaining quota)"
+        ),
+        model_count=len(discovery.models),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, ClassVar, Literal, Optional
 
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -31,31 +31,107 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # --- Persistence ------------------------------------------------------
-    database_url: str = "postgresql+asyncpg://mpg:mpg@postgres:5432/mpg"
+    # Defaults are the no-service path: a single SQLite file, no Redis, no
+    # Celery. Point these at PostgreSQL and Redis to scale out; nothing else
+    # in the app changes.
+    database_url: str = "sqlite+aiosqlite:///./data/mpg.db"
+    sqlite_directory: str = "./data"
     database_pool_size: int = 10
     database_max_overflow: int = 20
 
-    redis_url: str = "redis://redis:6379/0"
-    celery_broker_url: str = "redis://redis:6379/1"
-    celery_result_backend: str = "redis://redis:6379/2"
+    # Empty means "run in-process": the event bus, rate limiter and revocation
+    # store all fall back to in-memory implementations.
+    redis_url: str = ""
+    celery_broker_url: str = ""
+    celery_result_backend: str = ""
 
-    qdrant_url: str = "http://qdrant:6333"
-    qdrant_api_key: str | None = None
+    # Empty disables the vector index entirely; semantic search then returns
+    # nothing and the pipeline is unaffected.
+    qdrant_url: str = ""
+    qdrant_api_key: Optional[str] = None
     qdrant_collection: str = "mpg_prompts"
+
+    # Embeddings. "ollama" keeps the whole stack open-source and key-free;
+    # switching provider changes the vector width, so the collection must be
+    # recreated when this changes.
+    embedding_provider: Literal["openai", "ollama", "disabled"] = "openai"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 
     # --- Security ---------------------------------------------------------
-    jwt_secret_key: str = Field(default="change-me-in-production", min_length=8)
+    DEFAULT_JWT_SECRET: ClassVar[str] = "change-me-in-production"
+
+    jwt_secret_key: str = Field(default=DEFAULT_JWT_SECRET, min_length=8)
     jwt_algorithm: str = "HS256"
     access_token_ttl_minutes: int = 60
     refresh_token_ttl_minutes: int = 60 * 24 * 14
-    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    # A websocket handshake cannot carry a header, so its credential travels in
+    # the URL and lands in logs. Long enough to cover fetch-then-connect and a
+    # reconnect attempt; short enough that a ticket recovered from a log has
+    # almost certainly expired, on top of being single-use.
+    ws_ticket_ttl_seconds: int = 60
+    # NoDecode: pydantic-settings otherwise attempts json.loads() on the raw env
+    # string for any list-typed field before a validator ever sees it, and
+    # "http://a,http://b" is not valid JSON -- the app would fail to boot the
+    # moment CORS_ORIGINS held more than one plain comma-separated origin.
+    # NoDecode hands the raw string through so _split_csv below can parse it.
+    cors_origins: Annotated[list[str], NoDecode] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ]
+
+    # Open registration is convenient locally and a liability in production.
+    # The very first account is always promoted to admin so the instance is
+    # usable; every later account is created as an engineer.
+    allow_open_registration: bool = True
+
+    # Reject a revoked token when the revocation store is unreachable. Defaults
+    # on in production (correctness over availability) and off locally.
+    strict_token_revocation: Optional[bool] = None
+
+    # --- Rate limits (per identity, sliding fixed window) ------------------
+    rate_limit_enabled: bool = True
+    rate_limit_login_per_minute: int = 10
+    rate_limit_register_per_hour: int = 5
+    rate_limit_runs_per_hour: int = 30
+
+    # --- Outbound endpoint policy ----------------------------------------
+    # A provider's api_base is attacker-reachable via the admin model registry,
+    # so pointing it at a private address is an SSRF primitive. Local inference
+    # legitimately needs private hosts, so they are allowed only by name.
+    api_base_allowlist: Annotated[list[str], NoDecode] = [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "ollama",
+        "vllm",
+        "host.docker.internal",
+    ]
 
     # --- Provider credentials --------------------------------------------
-    openai_api_key: str | None = None
-    anthropic_api_key: str | None = None
-    gemini_api_key: str | None = None
+    # Encrypts credentials entered through the admin UI before they are stored.
+    # Left unset, one is derived from jwt_secret_key so a fresh deployment
+    # works with no extra configuration -- see app.core.crypto for why that is
+    # a convenience rather than the recommendation.
+    credential_encryption_key: Optional[str] = None
+
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
+
+    # Hosted gateways that serve open-weight models. Both are optional; the
+    # Ollama path below needs no credential at all.
+    groq_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
+    together_api_key: Optional[str] = None
+    huggingface_api_key: Optional[str] = None
+
+    # --- Local open-source inference --------------------------------------
+    # Providers whose `provider` field names a local runtime inherit this base
+    # URL unless the registry entry overrides it, so the same models.json works
+    # inside Compose (http://ollama:11434) and on a workstation (localhost).
+    ollama_base_url: str = "http://ollama:11434"
+    vllm_base_url: Optional[str] = None
 
     # --- Orchestration tuning --------------------------------------------
     model_config_path: Path = BACKEND_ROOT / "config" / "models.json"
@@ -64,27 +140,123 @@ class Settings(BaseSettings):
     max_parallel_generations: int = 8
     llm_max_retries: int = 3
     llm_retry_base_delay: float = 1.5
+
+    # Output ceilings for the phases that return a small structured document.
+    # Without these every call inherits the provider's full max_tokens (4096+),
+    # which on a self-hosted model is a licence to decode thousands of tokens
+    # one at a time when the schema only needs a few hundred. These are
+    # ceilings, not targets: a well-behaved model still stops at its stop
+    # token, so this bounds the worst case rather than shortening the typical
+    # one. Sized with headroom -- a truncated reply fails to parse and costs a
+    # repair round-trip, which is more expensive than the tokens saved.
+    analysis_max_tokens: int = 1536
+    judge_max_tokens: int = 1536
+
+    # Compare directives by meaning rather than shared words when merging.
+    # The lexical measure scores one rule written two ways at ~0.18, so the
+    # merge ships both and records each as uncorroborated -- discarding the
+    # agreement a fan-out exists to find. Embedding every directive costs a
+    # fraction of a cent per run against the generation calls that produced
+    # them, but it adds a dependency on the embedding provider, so it is opt-in
+    # until measured on your own briefs. Off falls back to the lexical merge
+    # exactly as before; so does any embedding failure.
+    semantic_merge_enabled: bool = False
     judge_model_id: str = "anthropic-claude-sonnet"
     consensus_model_id: str = "anthropic-claude-sonnet"
     analyzer_model_id: str = "openai-gpt4o"
 
     # --- Observability ----------------------------------------------------
     otel_enabled: bool = False
-    otel_exporter_otlp_endpoint: str | None = None
+    otel_exporter_otlp_endpoint: Optional[str] = None
     otel_service_name: str = "mpg-backend"
     log_level: str = "INFO"
     metrics_path: str = "/metrics"
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "api_base_allowlist", mode="before")
     @classmethod
-    def _split_origins(cls, value: object) -> object:
+    def _split_csv(cls, value: object) -> object:
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
+    @model_validator(mode="after")
+    def _enforce_deployment_safety(self) -> "Settings":
+        """Refuse to boot a non-local deployment with give-away defaults.
+
+        Every one of these is exploitable the moment the service is reachable,
+        and each has been shipped by someone who assumed the default was a
+        placeholder rather than a live value.
+        """
+        if self.environment == "local":
+            if self.strict_token_revocation is None:
+                self.strict_token_revocation = False
+            return self
+
+        problems: list[str] = []
+        if self.jwt_secret_key == self.DEFAULT_JWT_SECRET:
+            problems.append(
+                "JWT_SECRET_KEY is still the shipped default, so anyone can "
+                "forge an admin token. Generate one with: "
+                'python -c "import secrets; print(secrets.token_urlsafe(48))"'
+            )
+        elif len(self.jwt_secret_key) < 32:
+            problems.append("JWT_SECRET_KEY must be at least 32 characters.")
+
+        if "*" in self.cors_origins:
+            problems.append(
+                "CORS_ORIGINS may not be '*' while credentials are allowed."
+            )
+        if ":mpg@" in self.database_url or "://mpg:mpg" in self.database_url:
+            problems.append("DATABASE_URL still uses the default mpg/mpg credentials.")
+        elif self.database_url == type(self).model_fields["database_url"].default:
+            # The default is the single-file SQLite path, which exists so a
+            # workstation needs no services. Reaching production on it means
+            # nobody set DATABASE_URL: the data then lives on container-local
+            # disk and disappears with the container. Comparing against the
+            # field default rather than matching on "sqlite" keeps a
+            # deliberate, explicitly-configured SQLite deployment possible.
+            problems.append(
+                "DATABASE_URL is still the built-in SQLite default, so the "
+                "database would live on container-local disk. Point it at a "
+                "real database, e.g. postgresql+asyncpg://user:pw@host:5432/db"
+            )
+
+        if self.allow_open_registration:
+            # Anyone who can reach the service can mint an account, and the
+            # first one created is promoted to admin.
+            problems.append(
+                "ALLOW_OPEN_REGISTRATION must be false outside local: it lets "
+                "anyone who can reach the service create an account."
+            )
+
+        if problems:
+            raise ValueError(
+                f"Refusing to start in environment={self.environment}:\n  - "
+                + "\n  - ".join(problems)
+            )
+
+        if self.strict_token_revocation is None:
+            self.strict_token_revocation = True
+        return self
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def use_redis(self) -> bool:
+        """False when running single-process with in-memory infrastructure."""
+        return bool(self.redis_url.strip())
+
+    @property
+    def use_celery(self) -> bool:
+        """False when the pipeline should execute inline in the API process."""
+        return bool(self.celery_broker_url.strip())
+
+    @property
+    def frontend_dist(self) -> Path:
+        """Built SPA served directly by FastAPI, so no web server is required."""
+        return BACKEND_ROOT.parent / "frontend" / "dist"
 
 
 @lru_cache(maxsize=1)

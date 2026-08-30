@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { KeyRound, Sparkles } from 'lucide-react';
 import { GlassCard } from '@/components/ui/GlassCard';
+import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { Button } from '@/components/ui/Button';
 import { api, ApiError } from '@/services/api';
 
 const inputClass =
-  'w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2.5 text-[13px] text-white placeholder:text-white/30 outline-none transition focus:border-aurora-400/60';
+  'w-full rounded-xl border border-line-2 bg-surface-2 px-3 py-2.5 text-[13px] text-ink-strong placeholder:text-ink-4 outline-none transition focus:border-aurora-400/60';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -39,6 +40,11 @@ export function LoginPage() {
 
   return (
     <div className="grid min-h-screen place-items-center px-4">
+      {/* The nav does not exist yet at this point, so the control lives here
+          too -- otherwise the theme cannot be changed before signing in. */}
+      <div className="fixed right-4 top-4 z-10">
+        <ThemeToggle />
+      </div>
       <motion.div
         initial={{ opacity: 0, scale: 0.97 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -51,7 +57,7 @@ export function LoginPage() {
               <Sparkles className="size-5 text-white" />
             </span>
             <div>
-              <h1 className="text-[17px] font-semibold tracking-tight text-white">
+              <h1 className="text-[17px] font-semibold tracking-tight text-ink-strong">
                 Master Prompt Generator
               </h1>
               <p className="text-[12px] text-dim">Multi-LLM consensus engineering</p>
@@ -131,7 +137,7 @@ export function LoginPage() {
           <button
             type="button"
             onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-            className="mt-4 w-full text-center text-[12px] text-dim transition hover:text-white"
+            className="mt-4 w-full text-center text-[12px] text-dim transition hover:text-ink-strong"
           >
             {mode === 'login'
               ? 'No account yet? Create one'

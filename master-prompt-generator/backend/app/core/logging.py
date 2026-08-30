@@ -7,12 +7,12 @@ import logging
 import sys
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from app.core.config import settings
 
-run_id_ctx: ContextVar[str | None] = ContextVar("run_id", default=None)
-request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
+run_id_ctx: ContextVar[Optional[str]] = ContextVar("run_id", default=None)
+request_id_ctx: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
 
 _RESERVED = frozenset(
     {

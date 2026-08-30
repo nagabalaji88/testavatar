@@ -19,6 +19,7 @@ import { ModelsPage } from '@/pages/ModelsPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
+import { ThemeToggle } from '@/components/ui/ThemeToggle';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -79,7 +80,7 @@ function NavLink({
       to={to}
       className={cn(
         'flex items-center gap-2 rounded-xl px-3 py-2 text-[13px] transition',
-        active ? 'bg-white/10 text-white' : 'text-dim hover:bg-white/6 hover:text-white',
+        active ? 'bg-surface-4 text-ink-strong' : 'text-dim hover:bg-surface-2 hover:text-ink-strong',
       )}
     >
       {icon}
@@ -108,7 +109,7 @@ function Shell({ children }: { children: ReactNode }) {
             <span className="grid size-8 place-items-center rounded-xl bg-gradient-to-b from-aurora-400 to-aurora-600 shadow-[0_6px_18px_rgba(31,62,245,0.45)]">
               <Sparkles className="size-4 text-white" />
             </span>
-            <span className="hidden text-[14px] font-semibold tracking-tight text-white sm:block">
+            <span className="hidden text-[14px] font-semibold tracking-tight text-ink-strong sm:block">
               Master Prompt Generator
             </span>
           </Link>
@@ -117,10 +118,11 @@ function Shell({ children }: { children: ReactNode }) {
           <NavLink to="/models" icon={<Cpu className="size-4" />} label="Models" />
 
           <div className="ml-auto flex items-center gap-3">
+            <ThemeToggle />
             {user ? (
               <span className="hidden text-[12px] text-dim sm:block">
                 {user.email}
-                <span className="ml-2 rounded-full bg-white/8 px-2 py-0.5 text-[10.5px] text-white/70">
+                <span className="ml-2 rounded-full bg-surface-3 px-2 py-0.5 text-[10.5px] text-ink-2">
                   {user.role}
                 </span>
               </span>
@@ -130,8 +132,9 @@ function Shell({ children }: { children: ReactNode }) {
               variant="ghost"
               aria-label="Sign out"
               onClick={() => {
-                api.logout();
-                window.location.href = '/login';
+                void api.logout().finally(() => {
+                  window.location.href = '/login';
+                });
               }}
             >
               <LogOut className="size-4" />

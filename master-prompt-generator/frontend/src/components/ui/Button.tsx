@@ -12,9 +12,9 @@ const buttonVariants = cva(
         primary:
           'bg-gradient-to-b from-aurora-400 to-aurora-600 text-white shadow-[0_6px_20px_rgba(31,62,245,0.45)] hover:brightness-110 active:brightness-95',
         glass:
-          'glass text-white hover:bg-white/10 active:bg-white/[0.06]',
+          'glass text-ink-strong hover:bg-surface-4 active:bg-surface-2',
         ghost:
-          'text-dim hover:bg-white/[0.07] hover:text-white',
+          'text-dim hover:bg-surface-3 hover:text-ink-strong',
         danger:
           'bg-rose-400/15 text-rose-400 ring-1 ring-inset ring-rose-400/30 hover:bg-rose-400/25',
       },
@@ -41,9 +41,26 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     { className, variant, size, asChild = false, loading = false, children, disabled, ...props },
     ref,
   ) => {
-    const Comp = asChild ? Slot : 'button';
+    // Radix's Slot requires exactly one element child: it clones its props
+    // onto that child rather than rendering its own DOM node. Injecting a
+    // loading-spinner sibling here works for a real <button>, but a second
+    // child (even one that evaluates to null) makes Slot's child count != 1
+    // and it throws. asChild callers hand rendering control to the wrapped
+    // element entirely, so they get children only, with no spinner slot.
+    if (asChild) {
+      return (
+        <Slot
+          ref={ref}
+          className={cn(buttonVariants({ variant, size }), className)}
+          {...props}
+        >
+          {children}
+        </Slot>
+      );
+    }
+
     return (
-      <Comp
+      <button
         ref={ref}
         className={cn(buttonVariants({ variant, size }), className)}
         disabled={disabled || loading}
@@ -51,7 +68,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       >
         {loading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
         {children}
-      </Comp>
+      </button>
     );
   },
 );

@@ -32,14 +32,17 @@ resolved rather than concatenated.
 **Windows** — double-click `run-mpg.bat`, or from a console:
 
 ```bat
-run-mpg.bat            :: build and start everything
+run-mpg.bat            :: build and start
 run-mpg.bat logs       :: tail the pipeline logs
 run-mpg.bat down       :: stop, keeping the data
 run-mpg.bat help       :: all commands
 ```
 
-It checks Docker, creates `.env` from `.env.example` on first run with a
-randomly generated `JWT_SECRET_KEY`, warns if no provider API key is set, waits
+Local open-source model execution (Ollama) is disabled; the stack always runs
+on API-key providers (OpenAI / Anthropic / Gemini). Add at least one key to
+`.env` — `run-mpg.bat local` reports how, rather than starting Ollama.
+
+It also checks Docker, generates a random `JWT_SECRET_KEY` on first run, waits
 for the API to report healthy, then opens the dashboard.
 
 **macOS / Linux**
@@ -55,13 +58,23 @@ docker compose up --build
 | API docs | http://localhost:8000/docs |
 | Prometheus metrics | http://localhost:8000/metrics |
 
-Register the first account from the sign-in screen, then launch a run. New
-accounts default to the `engineer` role; promote to `admin` in the `users`
-table to manage the model registry.
+Register the first account from the sign-in screen — **the first account on a
+fresh instance becomes the admin**. Every later registration is created as an
+engineer; an admin promotes them via `PATCH /auth/users/{id}/role`.
+
+Infrastructure ports bind to `127.0.0.1` by default, so the dashboard is the
+only thing exposed. See [Security](#security) before deploying anywhere shared.
 
 ## Architecture
 
-### Backend — Python 3.12 · FastAPI · LangGraph
+### Backend — Python 3.9 · FastAPI · LangGraph
+
+The backend targets **Python 3.9**, so the code uses `Optional[X]` / `Union[X, Y]`
+rather than PEP 604 `X | Y` (Pydantic, SQLModel and FastAPI evaluate annotations
+at runtime, where `|` is a 3.10 feature), `class Foo(str, Enum)` rather than
+`StrEnum`, plain `@dataclass` rather than `slots=True`, and
+`typing_extensions.TypedDict` for the LangGraph state schema. Verified with
+`vermin -t=3.9- --eval-annotations`.
 
 | Path | Responsibility |
 | --- | --- |
@@ -108,10 +121,30 @@ Four deterministic phases, each pure and unit-tested:
    duplicate threshold: "escalate below 0.7" and "escalate below 0.9" are 0.99
    similar and are a conflict, not a restatement. Losing directives are removed
    from the body, not merely annotated.
-3. **Merge** — adopt the strongest variant per section, then graft in directives
-   from other models that are neither duplicates nor conflict losers.
-4. **Optimize** — deduplicate lines, collapse whitespace runs, normalise heading
+3. **Merge — directive level, not section level.** Taking one model's section
+   wholesale discards a better-worded version of the same rule from another
+   model, and throws away the strongest signal available: that several models
+   independently arrived at the same instruction. Instead, equivalent
+   directives are clustered across models; each cluster keeps the **best
+   phrasing** and records its **support** (how many models produced it).
+   Directives are scored on specificity, measurability, imperative phrasing and
+   absence of hedging, then ranked by `0.45×quality + 0.30×authority +
+   0.25×support`. Agreement rescues a merely-adequate directive; quality
+   rescues a unique one; a directive with neither is cut. Bullet lists are
+   re-ordered strongest-first (they are unordered by nature); prose keeps
+   document order.
+4. **Reinforce** — merging can only be as good as its inputs, so when *every*
+   candidate omits a production concern the merged prompt inherits that blind
+   spot. Six rules detect the omission and close it with a curated directive:
+   injection defence, grounding/abstention, failure paths, PII handling,
+   determinism and scope boundaries. Additions are capped at four and reported
+   with a rationale. Two or more directives targeting a missing section create
+   that section in canonical order rather than piling into a fallback.
+5. **Optimize** — deduplicate lines, collapse whitespace runs, normalise heading
    levels and strip filler, preserving fenced code blocks verbatim.
+
+Reinforcement is what lifts the consensus *above* the best single model rather
+than merely matching it.
 
 An LLM polish pass then smooths the prose. It is **rejected** if it drops a
 heading or compresses below 55% of the merged length, so synthesis can never
@@ -148,6 +181,59 @@ latency get one axis each — never a dual-axis chart.
 > `Vite.config.ts` is capitalised to match the specified file layout, so the npm
 > scripts pass `--config Vite.config.ts` explicitly (Vite only auto-detects the
 > lowercase name).
+
+## Running on free, open-source models (disabled by default)
+
+`run-mpg.bat local` is disabled — it now just explains how to configure an
+API-key provider instead of starting Ollama, and the default `run-mpg.bat` /
+`docker compose up` never touches it. The underlying open-weight path still
+exists in the codebase and can be started directly with Compose if you want
+it:
+
+```bash
+cp .env.local.example .env
+docker compose --profile local up --build
+docker compose --profile local run --rm ollama-pull   # first run only
+```
+
+This starts an [Ollama](https://ollama.com) service and points the backend at
+`backend/config/models.local.json`, which fans out across **Qwen2.5 7B**,
+**Llama 3.1 8B** and **Mistral 7B**, with Gemma 2 and DeepSeek-R1 available but
+disabled. Embeddings switch to `nomic-embed-text`, so semantic search stays
+local too. Every provider reports `cost_per_1k = 0`, so the dashboard's spend
+tiles read `$0.00` rather than showing invented numbers.
+
+### What this costs you instead of money
+
+- **Disk:** roughly 12 GB of weights on first pull.
+- **Time:** a 7B model on CPU takes minutes per prompt. A three-model consensus
+  run can take tens of minutes. The local env therefore sets
+  `MAX_PARALLEL_GENERATIONS=1` — Ollama answers one request at a time by
+  default, so firing three at it concurrently just makes all three time out
+  together. With a GPU, raise `OLLAMA_NUM_PARALLEL` and that limit together.
+- **Quality:** 7B open models produce weaker prompts than frontier models. The
+  consensus engine partly compensates — its reinforcement phase adds the
+  production directives small models routinely omit — but do not expect parity.
+
+On a CPU-only machine, switch to 3B weights (`qwen2.5:3b-instruct`,
+`llama3.2:3b-instruct-q4_K_M`) and edit `models.local.json` to match; a run then
+finishes in minutes.
+
+### Hosted gateways for open models
+
+`models.local.json` also carries a disabled **Llama 3.3 70B via Groq** entry.
+Groq, OpenRouter and Together all serve open-weight models on free tiers and are
+far faster than local CPU inference. Set `GROQ_API_KEY` (or the OpenRouter /
+Together equivalent) and flip `enabled` to `true`. The models stay open source;
+only the hosting is someone else's.
+
+### Mixing open and hosted models
+
+Nothing forces an all-or-nothing choice. Copy entries between the two registry
+files — the ids are deliberately disjoint — and set `ANALYZER_MODEL_ID`,
+`JUDGE_MODEL_ID` and `CONSENSUS_MODEL_ID` to whichever ids you want driving each
+stage. A common split is local models for the fan-out and a stronger hosted
+model as the judge.
 
 ## Configuring models
 
@@ -187,13 +273,15 @@ npm run dev
 ## Tests
 
 ```bash
-cd backend && python -m pytest tests      # 26 tests, consensus + judge logic
+cd backend && python -m pytest tests      # 78 tests: engine, registry, security
 cd frontend && npm run typecheck && npm run build
 ```
 
 The suite covers the deterministic engine paths — section parsing, similarity,
-all three conflict kinds, merge provenance, the single-output-contract
-invariant, the optimizer, and the rule-engine scorer. Network-dependent agent
+all three conflict kinds, directive scoring, cluster support and best-phrasing
+selection, the solo-directive floor, merge provenance, the
+single-output-contract invariant, reinforcement placement and capping, the
+optimizer, and the rule-engine scorer. Network-dependent agent
 paths are exercised through their fallbacks.
 
 ## API surface
@@ -211,9 +299,31 @@ paths are exercised through their fallbacks.
 
 ## Security
 
-- Argon2 password hashing; JWT access + refresh tokens with typed claims.
-- RBAC (`viewer` < `engineer` < `admin`) enforced by dependency guards; runs are
-  scoped to their owner unless the caller is an admin.
+- **Server-assigned roles.** Registration takes no `role`; the first account on
+  a fresh instance becomes admin, everyone after is an engineer. Promotion is
+  admin-only via `PATCH /auth/users/{id}/role`, which also revokes the target's
+  existing sessions so a demoted admin cannot keep using an old token.
+- **Deployment guards.** With `ENVIRONMENT` set to staging or production the app
+  refuses to boot on the default `JWT_SECRET_KEY`, a secret under 32 characters,
+  wildcard CORS, or the default `mpg/mpg` database credentials.
+- **Token revocation.** Logout revokes the presented tokens by `jti`, and
+  `/auth/logout-all` invalidates every token issued to a user. Backed by Redis
+  with a TTL matched to the token lifetime. Fails closed in production,
+  open locally (`STRICT_TOKEN_REVOCATION`).
+- **SSRF guard.** A provider's `api_base` is admin-writable and fetched
+  server-side, so it is validated: http/https only, no embedded credentials,
+  instance-metadata addresses always blocked, private addresses permitted only
+  by name via `API_BASE_ALLOWLIST` (which is how local Ollama stays usable).
+- **Rate limits** on login (per caller and per account), registration, and run
+  creation — the last is a budget control, since every run spends provider money.
+- **Loopback by default.** Compose binds PostgreSQL, Redis, Qdrant, Ollama and
+  the API to `127.0.0.1`; only the frontend is exposed. Override with
+  `BIND_ADDRESS` only behind a firewall you control.
+- Argon2 password hashing; RBAC (`viewer` < `engineer` < `admin`) enforced by
+  dependency guards; runs are scoped to their owner unless the caller is admin.
 - Websockets authenticate via a query-parameter token (browsers cannot set
-  handshake headers) and close with 1008 on failure.
-- Set `JWT_SECRET_KEY` before any non-local deployment.
+  handshake headers) and close with 1008 on failure. Note the token may appear
+  in proxy access logs; terminate TLS and scrub query strings accordingly.
+
+Not yet addressed: no dependency vulnerability scanning in CI, no audit log of
+admin actions beyond structured logs, and no MFA.

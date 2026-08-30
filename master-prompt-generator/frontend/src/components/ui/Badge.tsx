@@ -5,7 +5,7 @@ import type { CandidateStatus, RiskLevel, RunStatus } from '@/types';
 type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'accent';
 
 const TONE_CLASSES: Record<Tone, string> = {
-  neutral: 'bg-white/8 text-white/70 ring-white/12',
+  neutral: 'bg-surface-3 text-ink-2 ring-line-2',
   info: 'bg-aurora-400/15 text-aurora-300 ring-aurora-400/30',
   success: 'bg-mint-400/15 text-mint-400 ring-mint-400/30',
   warning: 'bg-amber-400/15 text-amber-400 ring-amber-400/30',
