@@ -259,6 +259,10 @@ export interface RunSummary {
   duration_ms: number | null;
   created_at: string;
   completed_at: string | null;
+  /** Joined from the run's consensus row; null until synthesis lands. */
+  consensus_score: number | null;
+  improvement_over_best: number | null;
+  model_count: number;
 }
 
 export interface RunDetail extends RunSummary {

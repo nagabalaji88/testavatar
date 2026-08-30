@@ -614,6 +614,12 @@ class RunSummary(BaseModel):
     duration_ms: Optional[int]
     created_at: datetime
     completed_at: Optional[datetime]
+    # Joined from the run's consensus row. A list of runs whose only outcome
+    # column is cost cannot answer "which of these was any good", which is the
+    # question someone scanning it actually has. None until synthesis lands.
+    consensus_score: Optional[float] = None
+    improvement_over_best: Optional[float] = None
+    model_count: int = 0
 
 
 class RunDetail(RunSummary):

@@ -53,6 +53,7 @@ from app.db.session import get_session
 from app.models.domain import (
     ConsensusPrompt,
     ExecutionLog,
+    PromptCandidate,
     PromptRun,
     ProviderCredential,
     RunStatus,
@@ -427,14 +428,52 @@ async def list_runs(
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     run_status: Optional[str] = Query(default=None, alias="status"),
-) -> list[PromptRun]:
-    query = select(PromptRun).order_by(PromptRun.created_at.desc())
+) -> list[RunSummary]:
+    """Runs newest first, each carrying its outcome as well as its cost.
+
+    The score and lift come from an outer join rather than a follow-up query
+    per run: the list is the one place that reads every run at once, so a
+    per-row lookup here is the N+1 that shows up first under real history.
+    Outer, because a queued or failed run has no consensus row and must still
+    appear.
+    """
+    candidate_counts = (
+        select(
+            PromptCandidate.run_id.label("run_id"),
+            func.count(PromptCandidate.id).label("n"),
+        )
+        .group_by(PromptCandidate.run_id)
+        .subquery()
+    )
+
+    query = (
+        select(
+            PromptRun,
+            ConsensusPrompt.overall_score,
+            ConsensusPrompt.improvement_over_best,
+            func.coalesce(candidate_counts.c.n, 0),
+        )
+        .outerjoin(ConsensusPrompt, ConsensusPrompt.run_id == PromptRun.id)
+        .outerjoin(candidate_counts, candidate_counts.c.run_id == PromptRun.id)
+        .order_by(PromptRun.created_at.desc())
+    )
     if not principal.has_at_least(Role.ADMIN):
         query = query.where(PromptRun.owner_id == principal.user_id)
     if run_status:
         query = query.where(PromptRun.status == run_status)
-    result = await session.execute(query.limit(limit).offset(offset))
-    return list(result.scalars().all())
+
+    rows = (await session.execute(query.limit(limit).offset(offset))).all()
+    return [
+        RunSummary(
+            **RunSummary.model_validate(run).model_dump(
+                exclude={"consensus_score", "improvement_over_best", "model_count"}
+            ),
+            consensus_score=score,
+            improvement_over_best=lift,
+            model_count=count,
+        )
+        for run, score, lift, count in rows
+    ]
 
 
 @runs_router.get("/stats", response_model=dict)
